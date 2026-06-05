@@ -41,7 +41,10 @@ fn render_tree(result: &AnalysisResult, verbose: bool) -> String {
     // ── Target ─────────────────────────────────────────────
     let multi = result.roots.len() > 1;
     if multi {
-        let mut header = format!("  {}", theme.subject(&format!("{} files", result.roots.len())));
+        let mut header = format!(
+            "  {}",
+            theme.subject(&format!("{} changed files", result.roots.len()))
+        );
         if let AnalysisTarget::Diff { git_range, .. } = &result.target {
             header.push_str(&format!("  {}", theme.muted(&format!("· {git_range}"))));
         }
@@ -63,24 +66,28 @@ fn render_tree(result: &AnalysisResult, verbose: bool) -> String {
             theme.subject("nothing depends on this — safe to change")
         ));
     } else {
-        let aggregate = if multi { "  (combined)" } else { "" };
+        let aggregate = if multi {
+            format!("  (across all {} changes)", result.roots.len())
+        } else {
+            String::new()
+        };
         lines.push(format!(
             "  {}  {}  {}{}",
             theme.risk_pill(assessment.tier),
             theme.meter(assessment.tier),
             theme.subject(&format!(
-                "{} file{} · {} package{}",
+                "{} impacted file{} · {} package{}",
                 assessment.affected,
                 plural(assessment.affected),
                 assessment.packages,
                 plural(assessment.packages)
             )),
-            theme.muted(aggregate)
+            theme.muted(&aggregate)
         ));
         lines.push(format!(
             "  {}",
             theme.muted(&format!(
-                "{} direct → {} indirect · depth {} · {} endpoint{}",
+                "{} direct, {} indirect · depth {} · {} endpoint{}",
                 result.summary.directly_affected_files,
                 result.summary.transitively_affected_files,
                 assessment.max_depth,
@@ -269,13 +276,19 @@ fn assess(result: &AnalysisResult) -> Assessment {
     }
     let packages = package_keys.len();
 
+    // Ambiguity scoped to edges actually traversed for *this* impact, so the
+    // confidence reflects this result — not unrelated barrels elsewhere.
+    let ambiguous = result.edges.iter().filter(|edge| edge.is_ambiguous).count();
+
     Assessment {
         tier: compute_tier(affected, packages),
         affected,
         packages,
         leaves,
         max_depth,
-        ambiguous: result.summary.ambiguous_edges,
+        ambiguous,
+        // Unresolved imports have unknown targets, so they can't be scoped to a
+        // path — they're a repo-wide blind spot that may hide extra consumers.
         unresolved: result.summary.unresolved_imports,
     }
 }
@@ -464,21 +477,39 @@ fn is_leaf(node_id: &str, result: &AnalysisResult) -> bool {
     !result.edges.iter().any(|edge| edge.from == node_id)
 }
 
-/// A compact confidence tag for the footer. Ambiguous/unresolved edges mean the
-/// analyzer may be undercounting, so confidence drops rather than the risk tier.
+/// A compact confidence tag for the footer.
+///
+/// The high/partial verdict is driven only by ambiguity *on the impacted paths*
+/// — so "partial" means this specific result was traced through edges the
+/// analyzer couldn't pin down, not that the repo has fuzzy bits elsewhere.
+/// Repo-wide unresolved imports are surfaced as a separate "may hide consumers"
+/// caveat, since their targets are unknown and can't be tied to this path.
 fn confidence_tag(assessment: &Assessment, theme: &Theme) -> String {
-    if assessment.affected == 0 || (assessment.ambiguous == 0 && assessment.unresolved == 0) {
+    let on_path_clean = assessment.affected == 0 || assessment.ambiguous == 0;
+
+    let mut tag = if on_path_clean {
         format!("{} {}", theme.ok("●"), theme.muted("confidence: high"))
     } else {
         format!(
             "{} {}",
             theme.warn("●"),
             theme.warn(&format!(
-                "confidence: partial ({} ambiguous · {} unresolved)",
-                assessment.ambiguous, assessment.unresolved
+                "confidence: partial · {} ambiguous edge{} on these paths",
+                assessment.ambiguous,
+                plural(assessment.ambiguous)
             ))
         )
+    };
+
+    if assessment.affected > 0 && assessment.unresolved > 0 {
+        tag.push_str(&theme.muted(&format!(
+            " · {} unresolved import{} repo-wide may hide consumers",
+            assessment.unresolved,
+            plural(assessment.unresolved)
+        )));
     }
+
+    tag
 }
 
 fn plural(count: usize) -> &'static str {

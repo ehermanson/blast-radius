@@ -307,5 +307,6 @@ fn diff_mode_breaks_down_each_changed_file() {
         .assert()
         .success()
         .stdout(predicate::str::contains("IMPACT BY CHANGED FILE"))
-        .stdout(predicate::str::contains("combined"));
+        .stdout(predicate::str::contains("changed files"))
+        .stdout(predicate::str::contains("impacted file"));
 }
