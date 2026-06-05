@@ -1,0 +1,159 @@
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result};
+use ignore::WalkBuilder;
+use jsonc_parser::{ParseOptions, parse_to_serde_value};
+use serde::Deserialize;
+
+const SOURCE_EXTENSIONS: &[&str] = &["js", "jsx", "ts", "tsx"];
+
+#[derive(Debug, Clone)]
+pub struct RepoContext {
+    pub repo_root: PathBuf,
+    pub source_files: Vec<PathBuf>,
+    pub tsconfigs: Vec<TsConfigPath>,
+    pub package_jsons: Vec<PathBuf>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TsConfigPath {
+    pub path: PathBuf,
+    pub compiler_options: TsCompilerOptions,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct TsCompilerOptions {
+    #[serde(default)]
+    pub base_url: Option<String>,
+    #[serde(default)]
+    pub paths: BTreeMap<String, Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TsConfigFile {
+    #[serde(default, rename = "compilerOptions")]
+    compiler_options: TsCompilerOptions,
+}
+
+impl RepoContext {
+    pub fn discover(repo_root: &Path) -> Result<Self> {
+        let repo_root = repo_root
+            .canonicalize()
+            .with_context(|| format!("failed to resolve repo root {}", repo_root.display()))?;
+
+        let mut source_files = Vec::new();
+        let mut tsconfigs = Vec::new();
+        let mut package_jsons = Vec::new();
+
+        let walker = WalkBuilder::new(&repo_root)
+            .hidden(false)
+            .git_ignore(true)
+            .git_exclude(true)
+            .git_global(true)
+            .filter_entry(|entry| {
+                let name = entry.file_name().to_string_lossy();
+                !matches!(
+                    name.as_ref(),
+                    ".git" | "node_modules" | "dist" | "build" | "coverage" | ".next" | ".turbo"
+                )
+            })
+            .build();
+
+        for entry in walker {
+            let entry = entry?;
+            if !entry.file_type().is_some_and(|kind| kind.is_file()) {
+                continue;
+            }
+
+            let path = entry.into_path();
+            match path.file_name().and_then(|name| name.to_str()) {
+                Some("tsconfig.json") => {
+                    if let Ok(config) = load_tsconfig(&path) {
+                        tsconfigs.push(config);
+                    }
+                }
+                Some("package.json") => package_jsons.push(path.clone()),
+                _ => {}
+            }
+
+            if is_source_file(&path) {
+                source_files.push(path);
+            }
+        }
+
+        source_files.sort();
+        tsconfigs.sort_by(|a, b| a.path.cmp(&b.path));
+        package_jsons.sort();
+
+        Ok(Self {
+            repo_root,
+            source_files,
+            tsconfigs,
+            package_jsons,
+        })
+    }
+}
+
+fn load_tsconfig(path: &Path) -> Result<TsConfigPath> {
+    let contents = fs::read_to_string(path)
+        .with_context(|| format!("failed to read tsconfig {}", path.display()))?;
+    let value: serde_json::Value = parse_to_serde_value(
+        &contents,
+        &ParseOptions {
+            allow_comments: true,
+            allow_loose_object_property_names: false,
+            allow_trailing_commas: true,
+            allow_missing_commas: false,
+            allow_single_quoted_strings: false,
+            allow_hexadecimal_numbers: false,
+            allow_unary_plus_numbers: false,
+        },
+    )
+    .with_context(|| format!("failed to parse tsconfig {}", path.display()))?;
+    let parsed: TsConfigFile = serde_json::from_value(value)
+        .with_context(|| format!("failed to decode tsconfig {}", path.display()))?;
+    Ok(TsConfigPath {
+        path: path.to_path_buf(),
+        compiler_options: parsed.compiler_options,
+    })
+}
+
+fn is_source_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| SOURCE_EXTENSIONS.contains(&ext))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use tempfile::tempdir;
+
+    use super::RepoContext;
+
+    #[test]
+    fn discovers_source_files_and_tsconfig() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::write(
+            dir.path().join("tsconfig.json"),
+            r#"{"compilerOptions":{"baseUrl":".","paths":{"@ui/*":["packages/ui/*"]}}}"#,
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("src").join("Button.tsx"),
+            "export const Button = () => null;",
+        )
+        .unwrap();
+        fs::write(dir.path().join("package.json"), r#"{"name":"fixture"}"#).unwrap();
+
+        let repo = RepoContext::discover(dir.path()).unwrap();
+
+        assert_eq!(repo.source_files.len(), 1);
+        assert_eq!(repo.tsconfigs.len(), 1);
+        assert_eq!(repo.package_jsons.len(), 1);
+    }
+}
