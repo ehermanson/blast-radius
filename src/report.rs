@@ -3,6 +3,7 @@ use std::io::IsTerminal;
 use std::path::Path;
 
 use anyhow::Result;
+use figlet_rs::FIGlet;
 
 use crate::cli::OutputFormat;
 use crate::graph::{
@@ -948,23 +949,51 @@ impl Theme {
         self.paint(format!("{text:>12}"), "2;37")
     }
 
-    /// Stacked ASCII wordmark in a warm blast gradient, with a starburst accent.
+    /// Big ASCII wordmark on a single row, rendered from a FIGlet font and
+    /// tinted with a warm vertical "blast" gradient, led by a starburst accent.
     fn banner(&self) -> Vec<String> {
-        const BLAST: &str = r#"  ___   _      _   ___ _____
- | _ ) | |    /_\ / __|_   _|
- | _ \ | |__ / _ \\__ \ | |
- |___/ |____/_/ \_\___/ |_|"#;
-        const RADIUS: &str = r#"  ___   _   ___  ___ _   _ ___
- | _ \ /_\ |   \|_ _| | | / __|
- |   // _ \| |) || || |_| \__ \
- |_|_/_/ \_\___/|___|\___/|___/"#;
+        // The `slant` font gives the wordmark some forward motion. Trimming the
+        // font's trailing padding keeps the burst + wordmark to ~77 cols.
+        let wordmark = FIGlet::slant()
+            .ok()
+            .and_then(|font| font.convert("BLAST RADIUS").map(|fig| fig.to_string()));
+
+        let Some(wordmark) = wordmark else {
+            // Fallback if the font can't be loaded for any reason.
+            let burst = self.paint("-=*=-", "1;38;5;226");
+            let blast = self.paint("BLAST", "1;38;5;214");
+            let radius = self.paint("RADIUS", "1;38;5;202");
+            return vec![format!("  {burst}  {blast} {radius}")];
+        };
+
+        // Drop trailing per-line padding and the blank row the font appends.
+        let mut rows: Vec<&str> = wordmark.lines().map(str::trim_end).collect();
+        while rows.last().is_some_and(|l| l.is_empty()) {
+            rows.pop();
+        }
+        let height = rows.len().max(1);
+
+        // Warm vertical gradient (256-color), brightest at the top.
+        const GRADIENT: [&str; 6] = [
+            "38;5;226", "38;5;220", "38;5;214", "38;5;208", "38;5;202", "38;5;196",
+        ];
+
+        // A full starburst accent for "blast", vertically centered on the word.
+        const BURST: [&str; 5] = [r"\ ' /", r".\|/.", "-=*=-", r"'/|\'", r"/ . \"];
+        let burst_w = BURST.iter().map(|l| l.chars().count()).max().unwrap_or(0);
+        let pad_top = height.saturating_sub(BURST.len()) / 2;
 
         let mut out = Vec::new();
-        for line in BLAST.lines() {
-            out.push(self.paint(line, "1;38;5;214"));
-        }
-        for line in RADIUS.lines() {
-            out.push(self.paint(line, "1;38;5;202"));
+        for (i, row) in rows.iter().enumerate() {
+            let burst_line = i
+                .checked_sub(pad_top)
+                .and_then(|j| BURST.get(j))
+                .copied()
+                .unwrap_or("");
+            let burst = self.paint(format!("{burst_line:^burst_w$}"), "1;38;5;226");
+            let code = GRADIENT[(i * GRADIENT.len()) / height];
+            let word = self.paint(row, &format!("1;{code}"));
+            out.push(format!(" {burst} {word}"));
         }
         out
     }
