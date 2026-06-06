@@ -4,6 +4,7 @@ use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
+use serde_json::Value;
 
 use crate::fs::{RepoContext, TsConfigPath};
 
@@ -22,6 +23,13 @@ pub struct PackageInfo {
     pub name: String,
     pub root: PathBuf,
     pub entry_candidates: Vec<PathBuf>,
+    pub export_mappings: Vec<ExportMapping>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExportMapping {
+    pub key: String,
+    pub target: String,
 }
 
 #[derive(Debug, Clone)]
@@ -42,6 +50,8 @@ struct PackageJson {
     source: Option<String>,
     #[serde(default)]
     types: Option<String>,
+    #[serde(default)]
+    exports: Option<Value>,
 }
 
 impl Resolver {
@@ -138,6 +148,12 @@ impl Resolver {
     fn resolve_workspace_package(&self, specifier: &str) -> Option<PathBuf> {
         for package in &self.packages {
             if specifier == package.name {
+                if let Some(resolved) = resolve_package_export(package, ".")
+                    .and_then(|path| self.try_resolve_candidate(&path))
+                {
+                    return Some(resolved);
+                }
+
                 for candidate in &package.entry_candidates {
                     if let Some(resolved) = self.try_resolve_candidate(candidate) {
                         return Some(resolved);
@@ -146,6 +162,13 @@ impl Resolver {
             }
 
             if let Some(rest) = specifier.strip_prefix(&format!("{}/", package.name)) {
+                let export_key = format!("./{rest}");
+                if let Some(resolved) = resolve_package_export(package, &export_key)
+                    .and_then(|path| self.try_resolve_candidate(&path))
+                {
+                    return Some(resolved);
+                }
+
                 let direct = package.root.join(rest);
                 if let Some(resolved) = self.try_resolve_candidate(&direct) {
                     return Some(resolved);
@@ -191,6 +214,17 @@ impl Resolver {
             }
         }
 
+        if let Some(ext) = candidate.extension().and_then(|ext| ext.to_str()) {
+            if !RESOLUTION_EXTENSIONS.contains(&ext) {
+                for extension in RESOLUTION_EXTENSIONS {
+                    let path = candidate.with_extension(format!("{ext}.{extension}"));
+                    if self.source_files.contains(&path) {
+                        return Some(path);
+                    }
+                }
+            }
+        }
+
         if candidate.is_dir() || !candidate.extension().is_some() {
             for extension in RESOLUTION_EXTENSIONS {
                 let path = candidate.join(format!("index.{extension}"));
@@ -229,12 +263,66 @@ fn load_package_info(path: &Path) -> Result<Option<PackageInfo>> {
     entry_candidates.push(root.join("index.tsx"));
     entry_candidates.push(root.join("index.js"));
     entry_candidates.push(root.join("index.jsx"));
+    let export_mappings = collect_export_mappings(parsed.exports.as_ref());
 
     Ok(Some(PackageInfo {
         name: parsed.name,
         root,
         entry_candidates,
+        export_mappings,
     }))
+}
+
+fn collect_export_mappings(exports: Option<&Value>) -> Vec<ExportMapping> {
+    let Some(Value::Object(map)) = exports else {
+        return Vec::new();
+    };
+
+    let mut mappings = Vec::new();
+    for (key, value) in map {
+        if !key.starts_with('.') {
+            continue;
+        }
+        if let Some(target) = export_target(value) {
+            mappings.push(ExportMapping {
+                key: key.clone(),
+                target,
+            });
+        }
+    }
+    mappings
+}
+
+fn export_target(value: &Value) -> Option<String> {
+    match value {
+        Value::String(path) => Some(path.clone()),
+        Value::Object(map) => {
+            for key in ["dev", "source"] {
+                if let Some(Value::String(path)) = map.get(key) {
+                    return Some(path.clone());
+                }
+            }
+
+            for key in ["default", "import", "require"] {
+                if let Some(target) = map.get(key).and_then(export_target) {
+                    return Some(target);
+                }
+            }
+
+            None
+        }
+        _ => None,
+    }
+}
+
+fn resolve_package_export(package: &PackageInfo, export_key: &str) -> Option<PathBuf> {
+    for mapping in &package.export_mappings {
+        if let Some(captures) = match_alias(&mapping.key, export_key) {
+            let target = apply_alias_target(&mapping.target, &captures);
+            return Some(package.root.join(target));
+        }
+    }
+    None
 }
 
 fn match_alias(pattern: &str, specifier: &str) -> Option<Vec<String>> {
@@ -366,6 +454,102 @@ mod tests {
         assert!(matches!(
             resolver.resolve(&importer, "./server"),
             Resolution::Resolved(path) if path.ends_with("src/server.cts")
+        ));
+    }
+
+    #[test]
+    fn resolves_workspace_package_exports() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("packages/ui/src/components/button")).unwrap();
+        fs::create_dir_all(dir.path().join("apps/web/src")).unwrap();
+        fs::write(
+            dir.path().join("packages/ui/package.json"),
+            r#"{
+                "name":"@acme/ui",
+                "exports":{
+                    ".":{"dev":"./src/index.ts"},
+                    "./preset":{"dev":"./src/preset.ts"},
+                    "./*":{"dev":"./src/components/*/index.ts"}
+                }
+            }"#,
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("packages/ui/src/index.ts"),
+            "export * from './components/button';",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("packages/ui/src/preset.ts"),
+            "export const preset = true;",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("packages/ui/src/components/button/index.ts"),
+            "export const Button = () => null;",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("apps/web/src/App.tsx"),
+            "import { Button } from '@acme/ui/button'; import { preset } from '@acme/ui/preset';",
+        )
+        .unwrap();
+
+        let context = RepoContext::discover(dir.path()).unwrap();
+        let resolver = Resolver::new(&context).unwrap();
+        let importer = dir.path().join("apps/web/src/App.tsx");
+
+        assert!(matches!(
+            resolver.resolve(&importer, "@acme/ui/button"),
+            Resolution::Resolved(path) if path.ends_with("packages/ui/src/components/button/index.ts")
+        ));
+        assert!(matches!(
+            resolver.resolve(&importer, "@acme/ui/preset"),
+            Resolution::Resolved(path) if path.ends_with("packages/ui/src/preset.ts")
+        ));
+    }
+
+    #[test]
+    fn resolves_multi_dot_basenames() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::write(dir.path().join("package.json"), r#"{"name":"fixture"}"#).unwrap();
+        fs::write(
+            dir.path().join("src/App.tsx"),
+            "import './recipe.types'; import './docs.config'; import './routeTree.gen';",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("src/recipe.types.ts"),
+            "export type Recipe = {};",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("src/docs.config.ts"),
+            "export const docsConfig = {};",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("src/routeTree.gen.ts"),
+            "export const routeTree = {};",
+        )
+        .unwrap();
+
+        let context = RepoContext::discover(dir.path()).unwrap();
+        let resolver = Resolver::new(&context).unwrap();
+        let importer = dir.path().join("src/App.tsx");
+
+        assert!(matches!(
+            resolver.resolve(&importer, "./recipe.types"),
+            Resolution::Resolved(path) if path.ends_with("src/recipe.types.ts")
+        ));
+        assert!(matches!(
+            resolver.resolve(&importer, "./docs.config"),
+            Resolution::Resolved(path) if path.ends_with("src/docs.config.ts")
+        ));
+        assert!(matches!(
+            resolver.resolve(&importer, "./routeTree.gen"),
+            Resolution::Resolved(path) if path.ends_with("src/routeTree.gen.ts")
         ));
     }
 }

@@ -253,6 +253,12 @@ fn build_reverse_links(
     let mut reverse: BTreeMap<PathBuf, Vec<ConsumerLink>> = BTreeMap::new();
 
     for module in modules.values() {
+        let star_reexport_count = module
+            .reexports
+            .iter()
+            .filter(|reexport| matches!(reexport.imported, ReexportTarget::All))
+            .count();
+
         for import in &module.imports {
             let Resolution::Resolved(target) = resolver.resolve(&module.file, &import.source)
             else {
@@ -318,7 +324,10 @@ fn build_reverse_links(
                         ReexportTarget::All => EdgeKind::ReexportsStar,
                         _ => EdgeKind::ReexportsNamed,
                     },
-                    is_ambiguous: reexport.is_ambiguous,
+                    is_ambiguous: match reexport.imported {
+                        ReexportTarget::All => star_reexport_count > 1,
+                        _ => reexport.is_ambiguous,
+                    },
                 },
             });
         }
@@ -342,10 +351,18 @@ fn analyze_from_roots(
     let ambiguous_edges = modules
         .values()
         .map(|module| {
+            let star_reexport_count = module
+                .reexports
+                .iter()
+                .filter(|fact| matches!(fact.imported, ReexportTarget::All))
+                .count();
             module
                 .reexports
                 .iter()
-                .filter(|fact| fact.is_ambiguous)
+                .filter(|fact| match fact.imported {
+                    ReexportTarget::All => star_reexport_count > 1,
+                    _ => fact.is_ambiguous,
+                })
                 .count()
         })
         .sum::<usize>();
