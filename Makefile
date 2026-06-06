@@ -1,6 +1,6 @@
 SHELL := /bin/zsh
 
-.PHONY: test test-python test-rust test-all-languages coverage coverage-gate perf quality quality-python quality-rust stress-chakra stress-python-demo stress-fastapi stress-rust-demo smoke-mui build metrics
+.PHONY: test test-python test-rust test-components test-all-languages coverage coverage-gate perf quality quality-python quality-rust quality-components stress-chakra stress-python-demo stress-fastapi stress-rust-demo stress-components smoke-mui build metrics
 
 build:
 	cargo build
@@ -14,8 +14,11 @@ test-python:
 test-rust:
 	cargo test --features rust
 
+test-components:
+	cargo test --features vue,svelte
+
 test-all-languages:
-	cargo test --features python,rust
+	cargo test --features python,rust,vue,svelte
 
 coverage:
 	cargo llvm-cov --summary-only
@@ -34,6 +37,9 @@ stress-fastapi:
 
 stress-rust-demo:
 	cargo run --features rust --bin blast-radius -- --repo-root examples/rust-demo file src/utils/formatting.rs
+
+stress-components:
+	cargo run --features vue,svelte --bin blast-radius -- --repo-root examples/component-demo file src/shared.ts
 
 smoke-mui: build
 	@if [ ! -d target/tmp/mui-mini/.git ] && [ ! -d target/tmp/mui-mini/docs ]; then \
@@ -56,3 +62,5 @@ quality: test coverage-gate stress-chakra
 quality-python: test-python stress-python-demo stress-fastapi
 
 quality-rust: test-rust stress-rust-demo
+
+quality-components: test-components stress-components

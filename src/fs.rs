@@ -129,6 +129,8 @@ fn is_source_file(path: &Path) -> bool {
     JAVASCRIPT_SOURCE_EXTENSIONS.contains(&ext)
         || is_python_source_extension(ext)
         || is_rust_source_extension(ext)
+        || is_vue_source_extension(ext)
+        || is_svelte_source_extension(ext)
 }
 
 #[cfg(feature = "python")]
@@ -148,6 +150,26 @@ fn is_rust_source_extension(ext: &str) -> bool {
 
 #[cfg(not(feature = "rust"))]
 fn is_rust_source_extension(_: &str) -> bool {
+    false
+}
+
+#[cfg(feature = "vue")]
+fn is_vue_source_extension(ext: &str) -> bool {
+    ext == "vue"
+}
+
+#[cfg(not(feature = "vue"))]
+fn is_vue_source_extension(_: &str) -> bool {
+    false
+}
+
+#[cfg(feature = "svelte")]
+fn is_svelte_source_extension(ext: &str) -> bool {
+    ext == "svelte"
+}
+
+#[cfg(not(feature = "svelte"))]
+fn is_svelte_source_extension(_: &str) -> bool {
     false
 }
 
@@ -185,6 +207,16 @@ mod tests {
         )
         .unwrap();
         fs::write(dir.path().join("src").join("lib.rs"), "pub fn helper() {}").unwrap();
+        fs::write(
+            dir.path().join("src").join("Button.vue"),
+            "<script setup>import x from './x'</script>",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("src").join("Card.svelte"),
+            "<script>import x from './x'</script>",
+        )
+        .unwrap();
         fs::write(dir.path().join("package.json"), r#"{"name":"fixture"}"#).unwrap();
 
         let repo = RepoContext::discover(dir.path()).unwrap();
@@ -194,6 +226,12 @@ mod tests {
             expected += 1;
         }
         if cfg!(feature = "rust") {
+            expected += 1;
+        }
+        if cfg!(feature = "vue") {
+            expected += 1;
+        }
+        if cfg!(feature = "svelte") {
             expected += 1;
         }
         assert_eq!(repo.source_files.len(), expected);
@@ -223,6 +261,34 @@ mod tests {
         let dir = tempdir().unwrap();
         fs::create_dir_all(dir.path().join("src")).unwrap();
         fs::write(dir.path().join("src").join("lib.rs"), "pub fn helper() {}").unwrap();
+
+        let repo = RepoContext::discover(dir.path()).unwrap();
+
+        assert_eq!(repo.source_files.len(), 1);
+    }
+
+    #[cfg(feature = "vue")]
+    #[test]
+    fn discovers_vue_sources_when_enabled() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::write(dir.path().join("src").join("Button.vue"), "<template />").unwrap();
+
+        let repo = RepoContext::discover(dir.path()).unwrap();
+
+        assert_eq!(repo.source_files.len(), 1);
+    }
+
+    #[cfg(feature = "svelte")]
+    #[test]
+    fn discovers_svelte_sources_when_enabled() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::write(
+            dir.path().join("src").join("Card.svelte"),
+            "<script></script>",
+        )
+        .unwrap();
 
         let repo = RepoContext::discover(dir.path()).unwrap();
 

@@ -60,3 +60,19 @@ jobs:
 
       - name: Stress test Rust demo
         run: cargo run --features rust --bin blast-radius -- --repo-root examples/rust-demo file src/utils/formatting.rs > /dev/null
+
+  components:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run Vue/Svelte feature tests
+        run: cargo test --features vue,svelte
+
+      - name: Stress test component demo
+        run: cargo run --features vue,svelte --bin blast-radius -- --repo-root examples/component-demo file src/shared.ts > /dev/null

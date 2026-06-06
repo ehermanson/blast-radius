@@ -9,6 +9,8 @@
 - Default exports, named exports, barrels, and `export *`
 - `tsconfig.json` path aliases
 - Cross-package resolution for in-repo workspace packages
+- Optional Vue single-file component support behind `--features vue`
+- Optional Svelte component support behind `--features svelte`
 - Optional Python support behind `--features python`
 - Optional Rust support behind `--features rust`
 - Terminal tree, JSON, Mermaid, and Graphviz DOT output
@@ -43,8 +45,11 @@ cargo build --features python
 # JS/TS + Rust
 cargo build --features rust
 
-# JS/TS + Python + Rust
-cargo build --features python,rust
+# JS/TS + Vue + Svelte
+cargo build --features vue,svelte
+
+# JS/TS + every optional adapter
+cargo build --features python,rust,vue,svelte
 ```
 
 There is no `--language` or `--languages` CLI flag yet. A binary scans whatever
@@ -73,6 +78,9 @@ file types were compiled into it.
 - `examples/rust-demo`
   A small Rust crate that exercises `mod`, `pub use`, and `crate::` / `self::`
   imports.
+- `examples/component-demo`
+  A small mixed Vue/Svelte fixture that exercises component script imports and
+  default component imports.
 
 Example run:
 
@@ -106,6 +114,9 @@ cargo run --features python --bin blast-radius -- --repo-root examples/fastapi f
 
 # Analyze a Rust crate fixture
 cargo run --features rust --bin blast-radius -- --repo-root examples/rust-demo file src/utils/formatting.rs
+
+# Analyze a mixed Vue/Svelte component fixture
+cargo run --features vue,svelte --bin blast-radius -- --repo-root examples/component-demo file src/shared.ts
 ```
 
 ## Development
@@ -118,6 +129,7 @@ Useful local quality commands:
 make test
 make test-python
 make test-rust
+make test-components
 make test-all-languages
 make coverage
 make coverage-gate
@@ -125,12 +137,14 @@ make stress-chakra
 make stress-python-demo
 make stress-fastapi
 make stress-rust-demo
+make stress-components
 make smoke-mui
 make perf
 make metrics
 make quality
 make quality-python
 make quality-rust
+make quality-components
 ```
 
 See `docs/quality.md` for what each command validates.

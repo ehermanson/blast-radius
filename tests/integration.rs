@@ -30,6 +30,11 @@ fn rust_fixture_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/rust")
 }
 
+#[cfg(all(feature = "vue", feature = "svelte"))]
+fn component_fixture_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/components")
+}
+
 fn copy_dir(from: &Path, to: &Path) {
     fs::create_dir_all(to).unwrap();
     for entry in fs::read_dir(from).unwrap() {
@@ -631,4 +636,77 @@ fn rust_export_mode_tracks_reexports() {
             .iter()
             .any(|label| label.contains("src/lib.rs#send_email"))
     );
+}
+
+#[cfg(all(feature = "vue", feature = "svelte"))]
+#[test]
+fn component_file_mode_reports_vue_svelte_transitive_blast_radius() {
+    let repo = component_fixture_root();
+
+    let output = AssertCommand::cargo_bin("blast-radius")
+        .unwrap()
+        .current_dir(&repo)
+        .args([
+            "--repo-root",
+            repo.to_str().unwrap(),
+            "--format",
+            "json",
+            "file",
+            "src/shared.ts",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let json: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(json["summary"]["parse_failures"].as_u64().unwrap(), 0);
+    assert_eq!(json["summary"]["unresolved_imports"].as_u64().unwrap(), 0);
+    let labels: Vec<String> = json["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|node| node["label"].as_str().map(ToOwned::to_owned))
+        .collect();
+
+    assert!(labels.iter().any(|label| label == "src/Button.vue"));
+    assert!(labels.iter().any(|label| label == "src/Card.svelte"));
+    assert!(labels.iter().any(|label| label == "src/App.ts"));
+}
+
+#[cfg(all(feature = "vue", feature = "svelte"))]
+#[test]
+fn component_file_mode_tracks_default_component_imports() {
+    let repo = component_fixture_root();
+
+    let output = AssertCommand::cargo_bin("blast-radius")
+        .unwrap()
+        .current_dir(&repo)
+        .args([
+            "--repo-root",
+            repo.to_str().unwrap(),
+            "--format",
+            "json",
+            "file",
+            "src/Button.vue",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let json: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(json["summary"]["parse_failures"].as_u64().unwrap(), 0);
+    assert_eq!(json["summary"]["unresolved_imports"].as_u64().unwrap(), 0);
+    let labels: Vec<String> = json["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|node| node["label"].as_str().map(ToOwned::to_owned))
+        .collect();
+
+    assert!(labels.iter().any(|label| label == "src/Card.svelte"));
+    assert!(labels.iter().any(|label| label == "src/App.ts"));
 }

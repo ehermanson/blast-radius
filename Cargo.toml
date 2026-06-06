@@ -11,6 +11,8 @@ default = ["javascript"]
 javascript = []
 python = ["dep:rustpython-parser"]
 rust = ["dep:syn"]
+vue = []
+svelte = []
 
 [dependencies]
 anyhow = "1.0"

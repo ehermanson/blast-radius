@@ -8,18 +8,8 @@ use serde_json::Value;
 
 use crate::fs::{RepoContext, TsConfigPath};
 
-#[cfg(all(not(feature = "python"), not(feature = "rust")))]
-const RESOLUTION_EXTENSIONS: &[&str] = &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"];
-#[cfg(all(feature = "python", not(feature = "rust")))]
-const RESOLUTION_EXTENSIONS: &[&str] =
-    &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "py"];
-#[cfg(all(not(feature = "python"), feature = "rust"))]
-const RESOLUTION_EXTENSIONS: &[&str] =
-    &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "rs"];
-#[cfg(all(feature = "python", feature = "rust"))]
-const RESOLUTION_EXTENSIONS: &[&str] = &[
-    "ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "py", "rs",
-];
+const JAVASCRIPT_RESOLUTION_EXTENSIONS: &[&str] =
+    &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"];
 
 #[derive(Debug, Clone)]
 pub struct Resolver {
@@ -415,7 +405,7 @@ impl Resolver {
             return Some(candidate);
         }
 
-        for extension in RESOLUTION_EXTENSIONS {
+        for extension in resolution_extensions() {
             let path = candidate.with_extension(extension);
             if self.source_files.contains(&path) {
                 return Some(path);
@@ -423,8 +413,8 @@ impl Resolver {
         }
 
         if let Some(ext) = candidate.extension().and_then(|ext| ext.to_str()) {
-            if !RESOLUTION_EXTENSIONS.contains(&ext) {
-                for extension in RESOLUTION_EXTENSIONS {
+            if !resolution_extensions().contains(&ext) {
+                for extension in resolution_extensions() {
                     let path = candidate.with_extension(format!("{ext}.{extension}"));
                     if self.source_files.contains(&path) {
                         return Some(path);
@@ -433,8 +423,8 @@ impl Resolver {
             }
         }
 
-        if candidate.is_dir() || !candidate.extension().is_some() {
-            for extension in RESOLUTION_EXTENSIONS {
+        if candidate.is_dir() || candidate.extension().is_none() {
+            for extension in resolution_extensions() {
                 let path = candidate.join(format!("index.{extension}"));
                 if self.source_files.contains(&path) {
                     return Some(path);
@@ -462,6 +452,23 @@ fn is_python_file(path: &Path) -> bool {
 #[cfg(feature = "rust")]
 fn is_rust_file(path: &Path) -> bool {
     path.extension().and_then(|ext| ext.to_str()) == Some("rs")
+}
+
+fn resolution_extensions() -> Vec<&'static str> {
+    let mut extensions = JAVASCRIPT_RESOLUTION_EXTENSIONS.to_vec();
+    if cfg!(feature = "python") {
+        extensions.push("py");
+    }
+    if cfg!(feature = "rust") {
+        extensions.push("rs");
+    }
+    if cfg!(feature = "vue") {
+        extensions.push("vue");
+    }
+    if cfg!(feature = "svelte") {
+        extensions.push("svelte");
+    }
+    extensions
 }
 
 #[cfg(feature = "rust")]

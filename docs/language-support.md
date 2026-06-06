@@ -7,6 +7,8 @@ Cargo features, not runtime CLI flags.
 Current status:
 
 - JS/TS is enabled by default.
+- Vue exists behind `--features vue`.
+- Svelte exists behind `--features svelte`.
 - Python exists behind `--features python`.
 - Rust exists behind `--features rust`.
 - There is no `--language` / `--languages` CLI flag yet; a binary scans the
@@ -192,6 +194,35 @@ Definition of done:
   `pub use` reexports.
 - Done: CI has a Rust feature build/test job.
 
+## Phase 8: Add Vue And Svelte Components
+
+Vue and Svelte support use the existing SWC JavaScript/TypeScript parser. The
+adapter extracts `<script>` blocks from `.vue` and `.svelte` files, parses those
+blocks, and adds a synthetic default export for the component file.
+
+Tracked:
+
+- `.vue` files when `vue` is enabled
+- `.svelte` files when `svelte` is enabled
+- `<script>` and `<script setup>` imports
+- `lang="ts"` TypeScript script blocks
+- default component imports from JS/TS/Vue/Svelte files
+
+Skipped initially:
+
+- template-level dependency extraction
+- style blocks
+- Svelte/Vue compiler semantics
+- generated code from preprocessors
+
+Definition of done:
+
+- Done: Vue/Svelte files are discovered only when their features are enabled.
+- Done: component scripts feed the shared JS/TS parser.
+- Done: component files expose a default export.
+- Done: focused mixed fixture proves Vue -> Svelte -> TS transitive impact.
+- Done: CI has a Vue/Svelte feature build/test job.
+
 ## Suggested First Implementation Tasks
 
 1. Introduce `LanguageAdapter` and move JS/TS parser selection behind it.
@@ -209,3 +240,7 @@ Definition of done:
 13. Parse Rust `use`, `mod`, public symbols, and `pub use` reexports.
 14. Resolve Rust `crate`, `self`, `super`, and sibling module paths.
 15. Add CI job for `cargo test --features rust`.
+16. Add `vue` and `svelte` feature flags.
+17. Extract component script blocks and parse them through SWC.
+18. Add component default exports and mixed component fixtures.
+19. Add CI job for `cargo test --features vue,svelte`.
