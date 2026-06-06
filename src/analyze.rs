@@ -59,10 +59,11 @@ struct AffectedState {
 
 pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
     let resolver = Resolver::new(context)?;
-    let modules = load_modules(context)?;
+    let (modules, parse_warnings) = load_modules(context);
     let module_states = build_module_states(&modules);
     let reverse = build_reverse_links(&modules, &module_states, &resolver);
     let unresolved_imports = count_unresolved_imports(&modules, &resolver);
+    let parse_failures = parse_warnings.len();
 
     match &cli.command {
         Command::Export { file, export_name } => {
@@ -86,6 +87,8 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
                 &modules,
                 &module_states,
                 &reverse,
+                parse_warnings,
+                parse_failures,
                 unresolved_imports,
                 vec![(file, exports, true)],
             )
@@ -117,6 +120,8 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
                 &modules,
                 &module_states,
                 &reverse,
+                parse_warnings,
+                parse_failures,
                 unresolved_imports,
                 vec![(file, exports, true)],
             )
@@ -153,6 +158,8 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
                 &modules,
                 &module_states,
                 &reverse,
+                parse_warnings,
+                parse_failures,
                 unresolved_imports,
                 roots,
             )
@@ -187,6 +194,8 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
                 &modules,
                 &module_states,
                 &reverse,
+                parse_warnings,
+                parse_failures,
                 unresolved_imports,
                 roots,
             )
@@ -194,13 +203,24 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
     }
 }
 
-fn load_modules(context: &RepoContext) -> Result<BTreeMap<PathBuf, ModuleFacts>> {
+fn load_modules(context: &RepoContext) -> (BTreeMap<PathBuf, ModuleFacts>, Vec<String>) {
     let mut modules = BTreeMap::new();
+    let mut warnings = Vec::new();
     for file in &context.source_files {
-        let facts = parse_module(file)?;
-        modules.insert(file.clone(), facts);
+        match parse_module(file) {
+            Ok(facts) => {
+                modules.insert(file.clone(), facts);
+            }
+            Err(error) => warnings.push(format!(
+                "skipped {}: {}",
+                file.strip_prefix(&context.repo_root)
+                    .unwrap_or(file)
+                    .display(),
+                error
+            )),
+        }
     }
-    Ok(modules)
+    (modules, warnings)
 }
 
 fn build_module_states(modules: &BTreeMap<PathBuf, ModuleFacts>) -> BTreeMap<PathBuf, ModuleState> {
@@ -314,6 +334,8 @@ fn analyze_from_roots(
     modules: &BTreeMap<PathBuf, ModuleFacts>,
     module_states: &BTreeMap<PathBuf, ModuleState>,
     reverse: &BTreeMap<PathBuf, Vec<ConsumerLink>>,
+    mut warnings: Vec<String>,
+    parse_failures: usize,
     unresolved_imports: usize,
     roots: Vec<(PathBuf, BTreeSet<String>, bool)>,
 ) -> Result<AnalysisResult> {
@@ -327,7 +349,17 @@ fn analyze_from_roots(
                 .count()
         })
         .sum::<usize>();
-    let warnings = Vec::new();
+    if parse_failures > 0 {
+        warnings.insert(
+            0,
+            format!(
+                "{} source file{} could not be parsed and {} skipped",
+                parse_failures,
+                if parse_failures == 1 { "" } else { "s" },
+                if parse_failures == 1 { "was" } else { "were" }
+            ),
+        );
+    }
     let workspaces = collect_workspaces(context);
 
     let (states, reasons) = run_bfs(&roots, &mode, modules, module_states, reverse);
@@ -356,6 +388,7 @@ fn analyze_from_roots(
         states,
         reasons,
         warnings,
+        parse_failures,
         unresolved_imports,
         ambiguous_edges,
         workspaces,
@@ -579,9 +612,11 @@ fn compute_root_impacts(
                 // An endpoint has no affected file depending on it in turn.
                 let endpoint = match reverse.get(file) {
                     None => true,
-                    Some(links) => !links
-                        .iter()
-                        .any(|link| states.get(&link.consumer_file).is_some_and(|s| s.depth >= 1)),
+                    Some(links) => !links.iter().any(|link| {
+                        states
+                            .get(&link.consumer_file)
+                            .is_some_and(|s| s.depth >= 1)
+                    }),
                 };
                 files.push(RootImpactFile {
                     path: relative_label(repo_root, file),
@@ -615,6 +650,7 @@ fn build_result(
     states: BTreeMap<PathBuf, AffectedState>,
     reasons: Vec<ImpactReason>,
     warnings: Vec<String>,
+    parse_failures: usize,
     unresolved_imports: usize,
     ambiguous_edges: usize,
     workspaces: Vec<Workspace>,
@@ -705,6 +741,7 @@ fn build_result(
             total_affected_files,
             unresolved_imports,
             ambiguous_edges,
+            parse_failures,
         },
         workspaces,
         roots: root_impacts,
@@ -734,7 +771,13 @@ fn collect_workspaces(context: &RepoContext) -> Vec<Workspace> {
                     .map(str::to_string)
             })
             .filter(|name| !name.is_empty())
-            .unwrap_or_else(|| if root.is_empty() { ".".to_string() } else { root.clone() });
+            .unwrap_or_else(|| {
+                if root.is_empty() {
+                    ".".to_string()
+                } else {
+                    root.clone()
+                }
+            });
         workspaces.push(Workspace { name, root });
     }
 

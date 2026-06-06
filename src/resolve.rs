@@ -7,7 +7,7 @@ use serde::Deserialize;
 
 use crate::fs::{RepoContext, TsConfigPath};
 
-const RESOLUTION_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx"];
+const RESOLUTION_EXTENSIONS: &[&str] = &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"];
 
 #[derive(Debug, Clone)]
 pub struct Resolver {
@@ -331,6 +331,41 @@ mod tests {
         assert!(matches!(
             resolver.resolve(&importer, "@acme/ui"),
             Resolution::Resolved(_)
+        ));
+    }
+
+    #[test]
+    fn resolves_modern_module_extensions() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::write(dir.path().join("package.json"), r#"{"name":"fixture"}"#).unwrap();
+        fs::write(
+            dir.path().join("src/App.tsx"),
+            "import { button } from './button'; import { server } from './server';",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("src/button.mjs"),
+            "export const button = 'ok';",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("src/server.cts"),
+            "export const server = 'ok';",
+        )
+        .unwrap();
+
+        let context = RepoContext::discover(dir.path()).unwrap();
+        let resolver = Resolver::new(&context).unwrap();
+        let importer = dir.path().join("src/App.tsx");
+
+        assert!(matches!(
+            resolver.resolve(&importer, "./button"),
+            Resolution::Resolved(path) if path.ends_with("src/button.mjs")
+        ));
+        assert!(matches!(
+            resolver.resolve(&importer, "./server"),
+            Resolution::Resolved(path) if path.ends_with("src/server.cts")
         ));
     }
 }

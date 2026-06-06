@@ -7,7 +7,7 @@ use ignore::WalkBuilder;
 use jsonc_parser::{ParseOptions, parse_to_serde_value};
 use serde::Deserialize;
 
-const SOURCE_EXTENSIONS: &[&str] = &["js", "jsx", "ts", "tsx"];
+const SOURCE_EXTENSIONS: &[&str] = &["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"];
 
 #[derive(Debug, Clone)]
 pub struct RepoContext {
@@ -148,11 +148,17 @@ mod tests {
             "export const Button = () => null;",
         )
         .unwrap();
+        fs::write(
+            dir.path().join("src").join("legacy.mjs"),
+            "export const legacy = true;",
+        )
+        .unwrap();
+        fs::write(dir.path().join("src").join("server.cts"), "export = {};").unwrap();
         fs::write(dir.path().join("package.json"), r#"{"name":"fixture"}"#).unwrap();
 
         let repo = RepoContext::discover(dir.path()).unwrap();
 
-        assert_eq!(repo.source_files.len(), 1);
+        assert_eq!(repo.source_files.len(), 3);
         assert_eq!(repo.tsconfigs.len(), 1);
         assert_eq!(repo.package_jsons.len(), 1);
     }

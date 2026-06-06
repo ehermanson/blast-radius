@@ -70,3 +70,18 @@ cargo run -- --repo-root examples/chakra-ui --verbose file packages/react/src/co
 ## Development
 
 This project expects a Rust toolchain with `cargo` available locally.
+
+Useful local quality commands:
+
+```bash
+make test
+make coverage
+make coverage-gate
+make stress-chakra
+make smoke-mui
+make perf
+make metrics
+make quality
+```
+
+See `docs/quality.md` for what each command validates.

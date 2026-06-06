@@ -105,6 +105,7 @@ pub struct Summary {
     pub total_affected_files: usize,
     pub unresolved_imports: usize,
     pub ambiguous_edges: usize,
+    pub parse_failures: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]

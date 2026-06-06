@@ -35,7 +35,10 @@ fn render_tree(result: &AnalysisResult, verbose: bool) -> String {
     }
     lines.push(format!(
         "  {}",
-        theme.muted(&format!("impact analysis · {} mode", format_mode(&result.mode)))
+        theme.muted(&format!(
+            "impact analysis · {} mode",
+            format_mode(&result.mode)
+        ))
     ));
     lines.push(String::new());
 
@@ -255,6 +258,7 @@ struct Assessment {
     max_depth: usize,
     ambiguous: usize,
     unresolved: usize,
+    parse_failures: usize,
 }
 
 fn assess(result: &AnalysisResult) -> Assessment {
@@ -265,7 +269,11 @@ fn assess(result: &AnalysisResult) -> Assessment {
         .collect();
 
     let affected = affected_nodes.len();
-    let max_depth = affected_nodes.iter().map(|node| node.depth).max().unwrap_or(0);
+    let max_depth = affected_nodes
+        .iter()
+        .map(|node| node.depth)
+        .max()
+        .unwrap_or(0);
     let leaves = affected_nodes
         .iter()
         .filter(|node| is_leaf(&node.id, result))
@@ -291,6 +299,7 @@ fn assess(result: &AnalysisResult) -> Assessment {
         // Unresolved imports have unknown targets, so they can't be scoped to a
         // path — they're a repo-wide blind spot that may hide extra consumers.
         unresolved: result.summary.unresolved_imports,
+        parse_failures: result.summary.parse_failures,
     }
 }
 
@@ -510,15 +519,20 @@ fn confidence_tag(assessment: &Assessment, theme: &Theme) -> String {
         )));
     }
 
+    if assessment.parse_failures > 0 {
+        tag.push_str(&theme.muted(&format!(
+            " · {} parse failure{} caused skipped file{} repo-wide and may hide consumers",
+            assessment.parse_failures,
+            plural(assessment.parse_failures),
+            plural(assessment.parse_failures)
+        )));
+    }
+
     tag
 }
 
 fn plural(count: usize) -> &'static str {
-    if count == 1 {
-        ""
-    } else {
-        "s"
-    }
+    if count == 1 { "" } else { "s" }
 }
 
 fn render_mermaid(result: &AnalysisResult) -> String {
@@ -590,8 +604,10 @@ fn preferred_root(result: &AnalysisResult) -> Option<String> {
             find_existing_node(result, &[&file_id])
         }
         AnalysisTarget::Files { files } => {
-            let preferred: Vec<String> =
-                files.iter().map(|file| format!("file:{}", file.display())).collect();
+            let preferred: Vec<String> = files
+                .iter()
+                .map(|file| format!("file:{}", file.display()))
+                .collect();
             let preferred_refs: Vec<&str> = preferred.iter().map(String::as_str).collect();
             find_existing_node(result, &preferred_refs)
         }
@@ -1021,7 +1037,6 @@ impl Theme {
         };
         self.paint(glyph, fg)
     }
-
 
     /// A solid-color risk chip, e.g. ` MODERATE `.
     fn risk_pill(&self, tier: RiskTier) -> String {

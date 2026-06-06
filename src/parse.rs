@@ -171,7 +171,7 @@ fn parse_source(path: &Path, source: &str) -> Result<Module> {
 
 fn syntax_for_path(path: &Path) -> Syntax {
     match path.extension().and_then(|ext| ext.to_str()) {
-        Some("ts") => Syntax::Typescript(TsSyntax {
+        Some("ts") | Some("mts") | Some("cts") => Syntax::Typescript(TsSyntax {
             tsx: false,
             decorators: true,
             ..Default::default()
@@ -181,14 +181,14 @@ fn syntax_for_path(path: &Path) -> Syntax {
             decorators: true,
             ..Default::default()
         }),
-        Some("jsx") => Syntax::Es(EsSyntax {
+        Some("js") | Some("jsx") | Some("mjs") | Some("cjs") => Syntax::Es(EsSyntax {
             jsx: true,
             decorators: true,
             export_default_from: true,
             ..Default::default()
         }),
         _ => Syntax::Es(EsSyntax {
-            jsx: false,
+            jsx: true,
             decorators: true,
             export_default_from: true,
             ..Default::default()
@@ -604,5 +604,57 @@ impl Visit for UsageCollector {
     fn visit_jsx_opening_element(&mut self, opening: &JSXOpeningElement) {
         self.mark_jsx_name(&opening.name);
         opening.visit_children_with(self);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use tempfile::tempdir;
+
+    use super::parse_module;
+
+    #[test]
+    fn parses_js_files_with_jsx() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("renderAvatar.js");
+        fs::write(
+            &path,
+            r#"
+import Avatar from '@mui/material/Avatar';
+
+export function renderAvatar(params) {
+  if (params.value == null) {
+    return '';
+  }
+
+  return <Avatar>{params.value.name}</Avatar>;
+}
+"#,
+        )
+        .unwrap();
+
+        let facts = parse_module(&path).unwrap();
+        assert_eq!(facts.imports.len(), 1);
+        assert!(
+            facts
+                .exports
+                .iter()
+                .any(|export| export.exported == "renderAvatar")
+        );
+    }
+
+    #[test]
+    fn parses_modern_module_extensions() {
+        let dir = tempdir().unwrap();
+
+        let mjs_path = dir.path().join("widget.mjs");
+        fs::write(&mjs_path, "export const widget = <div />;").unwrap();
+        parse_module(&mjs_path).unwrap();
+
+        let cts_path = dir.path().join("server.cts");
+        fs::write(&cts_path, "export const server = 1;").unwrap();
+        parse_module(&cts_path).unwrap();
     }
 }

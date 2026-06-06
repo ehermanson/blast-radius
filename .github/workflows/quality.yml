@@ -1,0 +1,27 @@
+name: quality
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Run tests
+        run: cargo test
+
+      - name: Enforce coverage floor
+        run: cargo llvm-cov --summary-only --fail-under-lines 85 --fail-under-regions 83 --fail-under-functions 84
+
+      - name: Stress test Chakra UI example
+        run: cargo run -- --repo-root examples/chakra-ui file packages/react/src/components/button/button.tsx > /dev/null

@@ -11,6 +11,10 @@ fn fixture_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/monorepo")
 }
 
+fn chakra_example_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/chakra-ui")
+}
+
 fn copy_dir(from: &Path, to: &Path) {
     fs::create_dir_all(to).unwrap();
     for entry in fs::read_dir(from).unwrap() {
@@ -298,15 +302,124 @@ fn diff_mode_breaks_down_each_changed_file() {
     AssertCommand::cargo_bin("blast-radius")
         .unwrap()
         .current_dir(repo.path())
-        .args([
-            "--repo-root",
-            repo.path().to_str().unwrap(),
-            "diff",
-            "HEAD",
-        ])
+        .args(["--repo-root", repo.path().to_str().unwrap(), "diff", "HEAD"])
         .assert()
         .success()
         .stdout(predicate::str::contains("IMPACT BY CHANGED FILE"))
         .stdout(predicate::str::contains("changed files"))
         .stdout(predicate::str::contains("impacted file"));
+}
+
+#[test]
+fn file_mode_skips_unparseable_files_and_reports_them() {
+    let repo = setup_repo();
+    fs::create_dir_all(repo.path().join("src")).unwrap();
+    fs::write(
+        repo.path().join("src").join("template.js"),
+        "export default makeThing({{{placeholder}}});\n",
+    )
+    .unwrap();
+    fs::write(
+        repo.path().join("src").join("index.js"),
+        "export const ok = () => null;\n",
+    )
+    .unwrap();
+
+    let output = AssertCommand::cargo_bin("blast-radius")
+        .unwrap()
+        .current_dir(repo.path())
+        .args([
+            "--repo-root",
+            repo.path().to_str().unwrap(),
+            "--format",
+            "json",
+            "file",
+            "src/index.js",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let json: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(json["summary"]["parse_failures"].as_u64().unwrap(), 1);
+    let warnings = json["warnings"].as_array().unwrap();
+    assert!(warnings.iter().any(|warning| {
+        warning
+            .as_str()
+            .is_some_and(|warning| warning.contains("could not be parsed"))
+    }));
+}
+
+#[test]
+fn chakra_ui_example_analyzes_real_world_repo() {
+    let repo = chakra_example_root();
+
+    let output = AssertCommand::cargo_bin("blast-radius")
+        .unwrap()
+        .current_dir(&repo)
+        .args([
+            "--repo-root",
+            repo.to_str().unwrap(),
+            "--format",
+            "json",
+            "file",
+            "packages/react/src/components/button/button.tsx",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let json: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(json["summary"]["parse_failures"].as_u64().unwrap(), 0);
+    assert!(json["summary"]["total_affected_files"].as_u64().unwrap() > 100);
+    assert!(json["summary"]["unresolved_imports"].as_u64().unwrap() > 0);
+    let labels: Vec<String> = json["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|node| node["label"].as_str().map(ToOwned::to_owned))
+        .collect();
+    assert!(labels
+        .iter()
+        .any(|label| label.contains("packages/react/__stories__/button.stories.tsx")));
+    assert!(labels
+        .iter()
+        .any(|label| label.contains("apps/compositions/src/examples/button-basic.tsx")));
+}
+
+#[test]
+fn vite_example_analyzes_real_world_repo() {
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/vite-react-ts");
+
+    let output = AssertCommand::cargo_bin("blast-radius")
+        .unwrap()
+        .current_dir(&repo)
+        .args([
+            "--repo-root",
+            repo.to_str().unwrap(),
+            "--format",
+            "json",
+            "file",
+            "src/App.tsx",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let json: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(json["summary"]["parse_failures"].as_u64().unwrap(), 0);
+    assert_eq!(json["summary"]["total_affected_files"].as_u64().unwrap(), 2);
+    let labels: Vec<String> = json["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|node| node["label"].as_str().map(ToOwned::to_owned))
+        .collect();
+    assert!(labels.iter().any(|label| label == "src/main.tsx"));
 }
