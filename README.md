@@ -9,6 +9,7 @@
 - Default exports, named exports, barrels, and `export *`
 - `tsconfig.json` path aliases
 - Cross-package resolution for in-repo workspace packages
+- Optional Python support behind `--features python`
 - Terminal tree, JSON, Mermaid, and Graphviz DOT output
 - At-a-glance risk verdict (minor / moderate / risky / high) with impacted files listed per package
 - Multi-file `diff` runs (e.g. a pre-commit/pre-push hook over staged files) show a combined verdict plus a per-file breakdown
@@ -41,30 +42,41 @@ total — handy in a pre-commit hook, where lint-staged passes staged files as a
   A real React + TypeScript template copied from Vite.
 - `examples/chakra-ui`
   A vendored snapshot of the Chakra UI monorepo for large-repo stress testing.
+- `examples/python-demo`
+  A small Python package that exercises package imports, relative imports, and
+  `__init__.py` reexports.
+- `examples/fastapi`
+  A vendored snapshot of FastAPI for large Python repo stress testing.
 
 Example run:
 
 ```bash
-cargo run -- --repo-root examples/monorepo-demo export packages/ui/src/Button.tsx Button
+cargo run --bin blast-radius -- --repo-root examples/monorepo-demo export packages/ui/src/Button.tsx Button
 ```
 
 More example runs:
 
 ```bash
 # Analyze a single file in the small monorepo fixture
-cargo run -- --repo-root examples/monorepo-demo file apps/storefront/src/App.tsx
+cargo run --bin blast-radius -- --repo-root examples/monorepo-demo file apps/storefront/src/App.tsx
 
 # Analyze a symbol export in the small monorepo fixture
-cargo run -- --repo-root examples/monorepo-demo export packages/ui/src/Button.tsx Button
+cargo run --bin blast-radius -- --repo-root examples/monorepo-demo export packages/ui/src/Button.tsx Button
 
 # Analyze a real Vite React app file
-cargo run -- --repo-root examples/vite-react-ts file src/App.tsx
+cargo run --bin blast-radius -- --repo-root examples/vite-react-ts file src/App.tsx
 
 # Stress test against a larger React monorepo
-cargo run -- --repo-root examples/chakra-ui file packages/react/src/components/button/button.tsx
+cargo run --bin blast-radius -- --repo-root examples/chakra-ui file packages/react/src/components/button/button.tsx
 
 # Show the full cascade tree for the same Chakra UI file
-cargo run -- --repo-root examples/chakra-ui --verbose file packages/react/src/components/button/button.tsx
+cargo run --bin blast-radius -- --repo-root examples/chakra-ui --verbose file packages/react/src/components/button/button.tsx
+
+# Analyze a Python package fixture
+cargo run --features python --bin blast-radius -- --repo-root examples/python-demo file app/utils/formatting.py
+
+# Stress test against a larger Python repo
+cargo run --features python --bin blast-radius -- --repo-root examples/fastapi file fastapi/applications.py
 ```
 
 ## Development
@@ -75,16 +87,20 @@ Useful local quality commands:
 
 ```bash
 make test
+make test-python
 make coverage
 make coverage-gate
 make stress-chakra
+make stress-python-demo
+make stress-fastapi
 make smoke-mui
 make perf
 make metrics
 make quality
+make quality-python
 ```
 
 See `docs/quality.md` for what each command validates.
 
-See `docs/language-support.md` for the planned adapter architecture for adding
-Python and other languages.
+See `docs/language-support.md` for the multi-language architecture and next
+language-adapter work.

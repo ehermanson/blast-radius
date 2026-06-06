@@ -26,7 +26,10 @@ fn main() -> Result<()> {
                 continue;
             }
 
-            if matches!(resolver.resolve(&module.file, &import.source), Resolution::Unresolved) {
+            if matches!(
+                resolver.resolve(&module.file, &import.source),
+                Resolution::Unresolved
+            ) {
                 *counts.entry(import.source.clone()).or_default() += 1;
             }
         }

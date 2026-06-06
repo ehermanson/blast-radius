@@ -15,6 +15,16 @@ fn chakra_example_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/chakra-ui")
 }
 
+#[cfg(feature = "python")]
+fn python_fixture_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/python")
+}
+
+#[cfg(feature = "python")]
+fn fastapi_example_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/fastapi")
+}
+
 fn copy_dir(from: &Path, to: &Path) {
     fs::create_dir_all(to).unwrap();
     for entry in fs::read_dir(from).unwrap() {
@@ -383,12 +393,16 @@ fn chakra_ui_example_analyzes_real_world_repo() {
         .iter()
         .filter_map(|node| node["label"].as_str().map(ToOwned::to_owned))
         .collect();
-    assert!(labels
-        .iter()
-        .any(|label| label.contains("packages/react/__stories__/button.stories.tsx")));
-    assert!(labels
-        .iter()
-        .any(|label| label.contains("apps/compositions/src/examples/button-basic.tsx")));
+    assert!(
+        labels
+            .iter()
+            .any(|label| label.contains("packages/react/__stories__/button.stories.tsx"))
+    );
+    assert!(
+        labels
+            .iter()
+            .any(|label| label.contains("apps/compositions/src/examples/button-basic.tsx"))
+    );
 }
 
 #[test]
@@ -422,4 +436,111 @@ fn vite_example_analyzes_real_world_repo() {
         .filter_map(|node| node["label"].as_str().map(ToOwned::to_owned))
         .collect();
     assert!(labels.iter().any(|label| label == "src/main.tsx"));
+}
+
+#[cfg(feature = "python")]
+#[test]
+fn python_file_mode_reports_transitive_blast_radius() {
+    let repo = python_fixture_root();
+
+    let output = AssertCommand::cargo_bin("blast-radius")
+        .unwrap()
+        .current_dir(&repo)
+        .args([
+            "--repo-root",
+            repo.to_str().unwrap(),
+            "--format",
+            "json",
+            "file",
+            "app/utils/formatting.py",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let json: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(json["summary"]["parse_failures"].as_u64().unwrap(), 0);
+    assert_eq!(json["summary"]["unresolved_imports"].as_u64().unwrap(), 0);
+    let labels: Vec<String> = json["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|node| node["label"].as_str().map(ToOwned::to_owned))
+        .collect();
+
+    assert!(labels.iter().any(|label| label == "app/services/email.py"));
+    assert!(labels.iter().any(|label| label == "app/main.py"));
+    assert!(labels.iter().any(|label| label == "tests/test_main.py"));
+}
+
+#[cfg(feature = "python")]
+#[test]
+fn python_export_mode_tracks_reexports() {
+    let repo = python_fixture_root();
+
+    let output = AssertCommand::cargo_bin("blast-radius")
+        .unwrap()
+        .current_dir(&repo)
+        .args([
+            "--repo-root",
+            repo.to_str().unwrap(),
+            "--format",
+            "json",
+            "export",
+            "app/services/email.py",
+            "send_email",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let json: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(json["summary"]["parse_failures"].as_u64().unwrap(), 0);
+    assert_eq!(json["summary"]["unresolved_imports"].as_u64().unwrap(), 0);
+    let labels: Vec<String> = json["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|node| node["label"].as_str().map(ToOwned::to_owned))
+        .collect();
+
+    assert!(
+        labels
+            .iter()
+            .any(|label| label.contains("app/services/__init__.py#send_email"))
+    );
+    assert!(labels.iter().any(|label| label == "app/main.py"));
+}
+
+#[cfg(feature = "python")]
+#[test]
+fn fastapi_example_analyzes_real_world_python_repo() {
+    let repo = fastapi_example_root();
+
+    let output = AssertCommand::cargo_bin("blast-radius")
+        .unwrap()
+        .current_dir(&repo)
+        .args([
+            "--repo-root",
+            repo.to_str().unwrap(),
+            "--format",
+            "json",
+            "file",
+            "fastapi/applications.py",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let json: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(json["summary"]["parse_failures"].as_u64().unwrap(), 0);
+    assert!(json["summary"]["unresolved_imports"].as_u64().unwrap() <= 1);
+    assert!(json["source_file_count"].as_u64().unwrap() > 1_000);
+    assert!(json["summary"]["total_affected_files"].as_u64().unwrap() > 600);
 }

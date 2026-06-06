@@ -1,8 +1,13 @@
 # Multi-Language Support Plan
 
 The goal is to keep the analyzer core language-neutral and add languages as
-small adapters. Python should be the first non-JS language because its import
-model is simpler than Rust, Go, or Java, and there are mature parser options.
+small adapters. Python is the first non-JS language because its import model is
+simpler than Rust, Go, or Java, and there are mature parser options.
+
+Current status: Python support exists behind `--features python`. The first
+implementation is intentionally conservative: it resolves normal package and
+relative imports, parses top-level public symbols, and over-approximates Python
+import usage to avoid false negatives.
 
 ## Target Architecture
 
@@ -65,9 +70,9 @@ Skip initially:
 
 Definition of done:
 
-- Python files are discovered only when Python support is enabled.
-- Python import/export facts appear in JSON output.
-- A small fixture proves relative imports, package imports, and `__init__.py`
+- Done: Python files are discovered only when Python support is enabled.
+- Done: Python import/export facts feed the shared analyzer.
+- Done: A small fixture proves relative imports, package imports, and `__init__.py`
   barrels.
 
 ## Phase 3: Add Python Resolver
@@ -83,10 +88,10 @@ Resolve imports using normal Python package rules:
 
 Definition of done:
 
-- `from app.service import thing` resolves to `app/service.py` or
+- Done: `from app.service import thing` resolves to `app/service.py` or
   `app/service/__init__.py`.
-- `from .models import User` resolves relative to the current package.
-- unresolved metric does not count standard library imports.
+- Done: `from .models import User` resolves relative to the current package.
+- Done: unresolved metric does not count standard library imports.
 
 ## Phase 4: Python Example Repos
 
@@ -107,8 +112,8 @@ Why FastAPI:
 
 Definition of done:
 
-- `examples/python-demo` is used in focused integration tests.
-- `examples/fastapi` has `UPSTREAM.md` with repository, commit, and license.
+- Done: `examples/python-demo` is used in focused integration tests.
+- Done: `examples/fastapi` has `UPSTREAM.md` with repository, commit, and license.
 - `make metrics` includes one Python case once Python support is stable.
 
 ## Phase 5: CLI And Build Shape
@@ -131,9 +136,9 @@ CLI behavior:
 
 Definition of done:
 
-- default builds stay lean.
-- `cargo build --features python` enables Python.
-- CI has at least one Python feature build/test job.
+- Done: default builds stay lean.
+- Done: `cargo build --features python` enables Python.
+- Done: CI has at least one Python feature build/test job.
 
 ## Phase 6: Accuracy Metrics
 

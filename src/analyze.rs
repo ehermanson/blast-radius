@@ -869,7 +869,7 @@ fn import_target_matches(
                     .iter()
                     .any(|member| current_exports.contains(member))
             })
-            .unwrap_or(false),
+            .unwrap_or_else(|| module.used_locals.contains(local) && !current_exports.is_empty()),
     }
 }
 

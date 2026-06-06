@@ -7,7 +7,8 @@ use ignore::WalkBuilder;
 use jsonc_parser::{ParseOptions, parse_to_serde_value};
 use serde::Deserialize;
 
-const SOURCE_EXTENSIONS: &[&str] = &["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"];
+const JAVASCRIPT_SOURCE_EXTENSIONS: &[&str] =
+    &["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"];
 
 #[derive(Debug, Clone)]
 pub struct RepoContext {
@@ -121,9 +122,21 @@ fn load_tsconfig(path: &Path) -> Result<TsConfigPath> {
 }
 
 fn is_source_file(path: &Path) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| SOURCE_EXTENSIONS.contains(&ext))
+    let Some(ext) = path.extension().and_then(|ext| ext.to_str()) else {
+        return false;
+    };
+
+    JAVASCRIPT_SOURCE_EXTENSIONS.contains(&ext) || is_python_source_extension(ext)
+}
+
+#[cfg(feature = "python")]
+fn is_python_source_extension(ext: &str) -> bool {
+    ext == "py"
+}
+
+#[cfg(not(feature = "python"))]
+fn is_python_source_extension(_: &str) -> bool {
+    false
 }
 
 #[cfg(test)]
@@ -154,12 +167,36 @@ mod tests {
         )
         .unwrap();
         fs::write(dir.path().join("src").join("server.cts"), "export = {};").unwrap();
+        fs::write(
+            dir.path().join("src").join("helper.py"),
+            "def helper(): pass",
+        )
+        .unwrap();
         fs::write(dir.path().join("package.json"), r#"{"name":"fixture"}"#).unwrap();
 
         let repo = RepoContext::discover(dir.path()).unwrap();
 
+        #[cfg(not(feature = "python"))]
         assert_eq!(repo.source_files.len(), 3);
+        #[cfg(feature = "python")]
+        assert_eq!(repo.source_files.len(), 4);
         assert_eq!(repo.tsconfigs.len(), 1);
         assert_eq!(repo.package_jsons.len(), 1);
+    }
+
+    #[cfg(feature = "python")]
+    #[test]
+    fn discovers_python_sources_when_enabled() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::write(
+            dir.path().join("src").join("helper.py"),
+            "def helper(): pass",
+        )
+        .unwrap();
+
+        let repo = RepoContext::discover(dir.path()).unwrap();
+
+        assert_eq!(repo.source_files.len(), 1);
     }
 }

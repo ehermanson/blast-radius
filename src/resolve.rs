@@ -8,7 +8,11 @@ use serde_json::Value;
 
 use crate::fs::{RepoContext, TsConfigPath};
 
+#[cfg(not(feature = "python"))]
 const RESOLUTION_EXTENSIONS: &[&str] = &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"];
+#[cfg(feature = "python")]
+const RESOLUTION_EXTENSIONS: &[&str] =
+    &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "py"];
 
 #[derive(Debug, Clone)]
 pub struct Resolver {
@@ -76,6 +80,14 @@ impl Resolver {
             .canonicalize()
             .unwrap_or_else(|_| clean_path(importer));
 
+        #[cfg(feature = "python")]
+        if is_python_file(&importer) {
+            if let Some(path) = self.resolve_python_import(&importer, specifier) {
+                return Resolution::Resolved(path);
+            }
+            return Resolution::Unresolved;
+        }
+
         if specifier.starts_with('.') || specifier.starts_with('/') {
             return self.resolve_path(importer.parent().unwrap_or(&self.repo_root), specifier);
         }
@@ -92,6 +104,14 @@ impl Resolver {
     }
 
     pub fn is_internal_specifier(&self, importer: &Path, specifier: &str) -> bool {
+        #[cfg(feature = "python")]
+        if is_python_file(importer) {
+            if specifier.starts_with('.') {
+                return true;
+            }
+            return self.python_top_level_exists(specifier);
+        }
+
         if specifier.starts_with('.') || specifier.starts_with('/') {
             return true;
         }
@@ -110,6 +130,62 @@ impl Resolver {
         self.packages.iter().any(|package| {
             specifier == package.name || specifier.starts_with(&format!("{}/", package.name))
         })
+    }
+
+    #[cfg(feature = "python")]
+    fn resolve_python_import(&self, importer: &Path, specifier: &str) -> Option<PathBuf> {
+        if specifier.starts_with('.') {
+            return self.resolve_python_relative_import(importer, specifier);
+        }
+
+        let candidate = self.repo_root.join(specifier.replace('.', "/"));
+        self.try_resolve_python_module_candidate(&candidate)
+    }
+
+    #[cfg(feature = "python")]
+    fn resolve_python_relative_import(&self, importer: &Path, specifier: &str) -> Option<PathBuf> {
+        let level = specifier.chars().take_while(|char| *char == '.').count();
+        let remainder = specifier.trim_start_matches('.');
+        let mut base = importer.parent().unwrap_or(&self.repo_root).to_path_buf();
+
+        for _ in 1..level {
+            base.pop();
+        }
+
+        let candidate = if remainder.is_empty() {
+            base
+        } else {
+            base.join(remainder.replace('.', "/"))
+        };
+        self.try_resolve_python_module_candidate(&candidate)
+    }
+
+    #[cfg(feature = "python")]
+    fn try_resolve_python_module_candidate(&self, candidate: &Path) -> Option<PathBuf> {
+        if let Some(path) = self.try_resolve_candidate(candidate) {
+            return Some(path);
+        }
+
+        let package_init = clean_path(&candidate.join("__init__.py"));
+        if self.source_files.contains(&package_init) {
+            return Some(package_init);
+        }
+
+        None
+    }
+
+    #[cfg(feature = "python")]
+    fn python_top_level_exists(&self, specifier: &str) -> bool {
+        let Some(first) = specifier.split('.').next() else {
+            return false;
+        };
+        if first.is_empty() {
+            return false;
+        }
+
+        let module_file = clean_path(&self.repo_root.join(format!("{first}.py")));
+        let package_init = clean_path(&self.repo_root.join(first).join("__init__.py"));
+        self.source_files.contains(&module_file) || self.source_files.contains(&package_init)
     }
 
     fn resolve_tsconfig_alias(&self, importer: &Path, specifier: &str) -> Option<PathBuf> {
@@ -232,10 +308,23 @@ impl Resolver {
                     return Some(path);
                 }
             }
+
+            #[cfg(feature = "python")]
+            {
+                let path = candidate.join("__init__.py");
+                if self.source_files.contains(&path) {
+                    return Some(path);
+                }
+            }
         }
 
         None
     }
+}
+
+#[cfg(feature = "python")]
+fn is_python_file(path: &Path) -> bool {
+    path.extension().and_then(|ext| ext.to_str()) == Some("py")
 }
 
 fn load_package_info(path: &Path) -> Result<Option<PackageInfo>> {
@@ -485,7 +574,8 @@ mod tests {
         )
         .unwrap();
         fs::write(
-            dir.path().join("packages/ui/src/components/button/index.ts"),
+            dir.path()
+                .join("packages/ui/src/components/button/index.ts"),
             "export const Button = () => null;",
         )
         .unwrap();
@@ -551,5 +641,41 @@ mod tests {
             resolver.resolve(&importer, "./routeTree.gen"),
             Resolution::Resolved(path) if path.ends_with("src/routeTree.gen.ts")
         ));
+    }
+
+    #[cfg(feature = "python")]
+    #[test]
+    fn resolves_python_absolute_relative_and_package_imports() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("app/services")).unwrap();
+        fs::create_dir_all(dir.path().join("app/utils")).unwrap();
+        fs::write(dir.path().join("app/__init__.py"), "").unwrap();
+        fs::write(dir.path().join("app/models.py"), "class User: pass").unwrap();
+        fs::write(
+            dir.path().join("app/services/email.py"),
+            "from ..models import User",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("app/utils/__init__.py"),
+            "def format_subject(): pass",
+        )
+        .unwrap();
+
+        let context = RepoContext::discover(dir.path()).unwrap();
+        let resolver = Resolver::new(&context).unwrap();
+        let importer = dir.path().join("app/services/email.py");
+
+        assert!(matches!(
+            resolver.resolve(&importer, "..models"),
+            Resolution::Resolved(path) if path.ends_with("app/models.py")
+        ));
+        assert!(matches!(
+            resolver.resolve(&importer, "app.utils"),
+            Resolution::Resolved(path) if path.ends_with("app/utils/__init__.py")
+        ));
+        assert!(resolver.is_internal_specifier(&importer, "..models"));
+        assert!(resolver.is_internal_specifier(&importer, "app.models"));
+        assert!(!resolver.is_internal_specifier(&importer, "dataclasses"));
     }
 }
