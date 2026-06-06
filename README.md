@@ -39,6 +39,8 @@ total — handy in a pre-commit hook, where lint-staged passes staged files as a
   A purpose-built workspace fixture that exercises aliases, barrels, CommonJS, and transitive React component usage.
 - `examples/vite-react-ts`
   A real React + TypeScript template copied from Vite.
+- `examples/chakra-ui`
+  A vendored snapshot of the Chakra UI monorepo for large-repo stress testing.
 
 Example run:
 
