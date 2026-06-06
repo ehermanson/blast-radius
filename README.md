@@ -85,3 +85,6 @@ make quality
 ```
 
 See `docs/quality.md` for what each command validates.
+
+See `docs/language-support.md` for the planned adapter architecture for adding
+Python and other languages.
