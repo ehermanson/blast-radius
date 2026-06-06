@@ -10,6 +10,7 @@
 - `tsconfig.json` path aliases
 - Cross-package resolution for in-repo workspace packages
 - Optional Python support behind `--features python`
+- Optional Rust support behind `--features rust`
 - Terminal tree, JSON, Mermaid, and Graphviz DOT output
 - At-a-glance risk verdict (minor / moderate / risky / high) with impacted files listed per package
 - Multi-file `diff` runs (e.g. a pre-commit/pre-push hook over staged files) show a combined verdict plus a per-file breakdown
@@ -26,6 +27,28 @@ blast-radius diff origin/main...HEAD
 
 `files` takes a list of paths and reports each file's blast radius plus a combined
 total — handy in a pre-commit hook, where lint-staged passes staged files as args.
+
+## Language Support
+
+Language support is selected at build time with Cargo features, not runtime CLI
+flags. The default binary supports JS/TS only.
+
+```bash
+# JS/TS only
+cargo build
+
+# JS/TS + Python
+cargo build --features python
+
+# JS/TS + Rust
+cargo build --features rust
+
+# JS/TS + Python + Rust
+cargo build --features python,rust
+```
+
+There is no `--language` or `--languages` CLI flag yet. A binary scans whatever
+file types were compiled into it.
 
 ## Output Formats
 
@@ -47,6 +70,9 @@ total — handy in a pre-commit hook, where lint-staged passes staged files as a
   `__init__.py` reexports.
 - `examples/fastapi`
   A vendored snapshot of FastAPI for large Python repo stress testing.
+- `examples/rust-demo`
+  A small Rust crate that exercises `mod`, `pub use`, and `crate::` / `self::`
+  imports.
 
 Example run:
 
@@ -77,6 +103,9 @@ cargo run --features python --bin blast-radius -- --repo-root examples/python-de
 
 # Stress test against a larger Python repo
 cargo run --features python --bin blast-radius -- --repo-root examples/fastapi file fastapi/applications.py
+
+# Analyze a Rust crate fixture
+cargo run --features rust --bin blast-radius -- --repo-root examples/rust-demo file src/utils/formatting.rs
 ```
 
 ## Development
@@ -88,16 +117,20 @@ Useful local quality commands:
 ```bash
 make test
 make test-python
+make test-rust
+make test-all-languages
 make coverage
 make coverage-gate
 make stress-chakra
 make stress-python-demo
 make stress-fastapi
+make stress-rust-demo
 make smoke-mui
 make perf
 make metrics
 make quality
 make quality-python
+make quality-rust
 ```
 
 See `docs/quality.md` for what each command validates.

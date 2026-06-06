@@ -126,7 +126,9 @@ fn is_source_file(path: &Path) -> bool {
         return false;
     };
 
-    JAVASCRIPT_SOURCE_EXTENSIONS.contains(&ext) || is_python_source_extension(ext)
+    JAVASCRIPT_SOURCE_EXTENSIONS.contains(&ext)
+        || is_python_source_extension(ext)
+        || is_rust_source_extension(ext)
 }
 
 #[cfg(feature = "python")]
@@ -136,6 +138,16 @@ fn is_python_source_extension(ext: &str) -> bool {
 
 #[cfg(not(feature = "python"))]
 fn is_python_source_extension(_: &str) -> bool {
+    false
+}
+
+#[cfg(feature = "rust")]
+fn is_rust_source_extension(ext: &str) -> bool {
+    ext == "rs"
+}
+
+#[cfg(not(feature = "rust"))]
+fn is_rust_source_extension(_: &str) -> bool {
     false
 }
 
@@ -172,14 +184,19 @@ mod tests {
             "def helper(): pass",
         )
         .unwrap();
+        fs::write(dir.path().join("src").join("lib.rs"), "pub fn helper() {}").unwrap();
         fs::write(dir.path().join("package.json"), r#"{"name":"fixture"}"#).unwrap();
 
         let repo = RepoContext::discover(dir.path()).unwrap();
 
-        #[cfg(not(feature = "python"))]
-        assert_eq!(repo.source_files.len(), 3);
-        #[cfg(feature = "python")]
-        assert_eq!(repo.source_files.len(), 4);
+        let mut expected = 3;
+        if cfg!(feature = "python") {
+            expected += 1;
+        }
+        if cfg!(feature = "rust") {
+            expected += 1;
+        }
+        assert_eq!(repo.source_files.len(), expected);
         assert_eq!(repo.tsconfigs.len(), 1);
         assert_eq!(repo.package_jsons.len(), 1);
     }
@@ -194,6 +211,18 @@ mod tests {
             "def helper(): pass",
         )
         .unwrap();
+
+        let repo = RepoContext::discover(dir.path()).unwrap();
+
+        assert_eq!(repo.source_files.len(), 1);
+    }
+
+    #[cfg(feature = "rust")]
+    #[test]
+    fn discovers_rust_sources_when_enabled() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::write(dir.path().join("src").join("lib.rs"), "pub fn helper() {}").unwrap();
 
         let repo = RepoContext::discover(dir.path()).unwrap();
 

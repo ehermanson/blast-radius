@@ -1,13 +1,19 @@
 # Multi-Language Support Plan
 
 The goal is to keep the analyzer core language-neutral and add languages as
-small adapters. Python is the first non-JS language because its import model is
-simpler than Rust, Go, or Java, and there are mature parser options.
+small adapters. Optional languages are currently selected at build time with
+Cargo features, not runtime CLI flags.
 
-Current status: Python support exists behind `--features python`. The first
-implementation is intentionally conservative: it resolves normal package and
-relative imports, parses top-level public symbols, and over-approximates Python
-import usage to avoid false negatives.
+Current status:
+
+- JS/TS is enabled by default.
+- Python exists behind `--features python`.
+- Rust exists behind `--features rust`.
+- There is no `--language` / `--languages` CLI flag yet; a binary scans the
+  languages compiled into it.
+
+The Python and Rust implementations are intentionally conservative and
+over-approximate import usage to avoid false negatives.
 
 ## Target Architecture
 
@@ -156,6 +162,36 @@ Definition of done:
 - Python unresolved imports have a ceiling in tests once the resolver is stable.
 - regressions in JS/TS metrics do not hide Python regressions, and vice versa.
 
+## Phase 7: Add Rust Parser And Resolver
+
+Rust support uses `syn` behind the optional `rust` Cargo feature. It currently
+tracks:
+
+- `.rs` files only when the feature is enabled
+- top-level public functions, structs, enums, traits, type aliases, consts, and
+  statics
+- `mod foo;` declarations
+- `use crate::module::Symbol`
+- `use self::module::Symbol`
+- `use super::module::Symbol`
+- grouped use trees like `use crate::module::{A, B}`
+- `pub use` reexports
+
+Skipped initially:
+
+- macro-expanded modules/imports
+- Cargo workspace package resolution
+- `#[path = "..."]` module attributes
+- precise Rust expression/body usage
+
+Definition of done:
+
+- Done: Rust files are discovered only when Rust support is enabled.
+- Done: `syn` is behind `--features rust`.
+- Done: focused Rust fixture proves `mod`, `crate::`, `self::`, `super::`, and
+  `pub use` reexports.
+- Done: CI has a Rust feature build/test job.
+
 ## Suggested First Implementation Tasks
 
 1. Introduce `LanguageAdapter` and move JS/TS parser selection behind it.
@@ -168,3 +204,8 @@ Definition of done:
 8. Vendor FastAPI under `examples/fastapi`.
 9. Add FastAPI smoke metrics.
 10. Add CI job for `cargo test --features python`.
+11. Add `syn` behind a `rust` Cargo feature.
+12. Add `examples/rust-demo`.
+13. Parse Rust `use`, `mod`, public symbols, and `pub use` reexports.
+14. Resolve Rust `crate`, `self`, `super`, and sibling module paths.
+15. Add CI job for `cargo test --features rust`.

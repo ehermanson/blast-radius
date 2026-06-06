@@ -7,19 +7,33 @@ both fixture repos and larger real-world React codebases.
 
 ```bash
 make test
+make test-python
+make test-rust
+make test-all-languages
 make coverage
 make coverage-gate
 make stress-chakra
+make stress-python-demo
+make stress-fastapi
+make stress-rust-demo
 make smoke-mui
 make perf
 make metrics
 make quality
+make quality-python
+make quality-rust
 ```
 
 ## What They Mean
 
 - `make test`
   Runs unit and integration tests, including the vendored Chakra UI regression.
+- `make test-python`
+  Runs tests with Python support compiled in via `--features python`.
+- `make test-rust`
+  Runs tests with Rust support compiled in via `--features rust`.
+- `make test-all-languages`
+  Runs tests with both optional language adapters compiled in.
 - `make coverage`
   Prints a line and region coverage summary using `cargo-llvm-cov`.
 - `make coverage-gate`
@@ -27,6 +41,12 @@ make quality
   `84%` functions.
 - `make stress-chakra`
   Runs a large-repo analysis against the vendored Chakra UI monorepo.
+- `make stress-python-demo`
+  Runs the small Python fixture through the Python feature build.
+- `make stress-fastapi`
+  Runs a large Python analysis against the vendored FastAPI snapshot.
+- `make stress-rust-demo`
+  Runs the small Rust fixture through the Rust feature build.
 - `make smoke-mui`
   Clones Material UI into `target/tmp/mui-mini` if needed and runs a real-world
   smoke test. This currently succeeds with one skipped template parse failure
@@ -40,6 +60,10 @@ make quality
 - `make quality`
   Runs the main local gate: tests, enforced coverage floor, and the Chakra
   stress run.
+- `make quality-python`
+  Runs Python feature tests plus Python stress cases.
+- `make quality-rust`
+  Runs Rust feature tests plus the Rust fixture stress case.
 
 ## Accuracy Metrics To Watch
 
@@ -48,6 +72,7 @@ make quality
 - `ambiguous_edges`
 - `total_affected_files` for known regression targets
 - runtime on `monorepo-demo`, `vite-react-ts`, and `chakra-ui`
+- runtime on optional language fixtures when their features are enabled
 - `target/quality/metrics.json` drift over time
 
 The current suite improves crash-resilience and parser coverage, but it is not

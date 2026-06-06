@@ -11,6 +11,9 @@ use swc_ecma_visit::{Visit, VisitWith};
 #[cfg(feature = "python")]
 use rustpython_parser::{Parse, ast as py_ast};
 
+#[cfg(feature = "rust")]
+use syn as rs_ast;
+
 #[derive(Debug, Clone)]
 pub struct ModuleFacts {
     pub file: PathBuf,
@@ -82,6 +85,11 @@ pub fn parse_module(path: &Path) -> Result<ModuleFacts> {
     #[cfg(feature = "python")]
     if path.extension().and_then(|ext| ext.to_str()) == Some("py") {
         return parse_python_module(path, &source);
+    }
+
+    #[cfg(feature = "rust")]
+    if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
+        return parse_rust_module(path, &source);
     }
 
     parse_javascript_module(path, &source)
@@ -323,6 +331,222 @@ fn add_python_export(facts: &mut ModuleFacts, name: String) {
         local: Some(name),
         kind: ExportKind::Local,
     });
+}
+
+#[cfg(feature = "rust")]
+fn parse_rust_module(path: &Path, source: &str) -> Result<ModuleFacts> {
+    let file = rs_ast::parse_file(source)
+        .with_context(|| format!("failed to parse rust module {}", path.display()))?;
+    let mut facts = ModuleFacts {
+        file: path.to_path_buf(),
+        exports: Vec::new(),
+        imports: Vec::new(),
+        reexports: Vec::new(),
+        used_locals: BTreeSet::new(),
+        namespace_member_usage: BTreeMap::new(),
+        warnings: Vec::new(),
+    };
+
+    for item in &file.items {
+        collect_rust_item(item, &mut facts);
+    }
+
+    // First-pass Rust support intentionally over-approximates import usage.
+    // It avoids false negatives until we add a Rust expression/body usage pass.
+    facts
+        .used_locals
+        .extend(facts.imports.iter().map(|import| import.local.clone()));
+
+    Ok(facts)
+}
+
+#[cfg(feature = "rust")]
+fn collect_rust_item(item: &rs_ast::Item, facts: &mut ModuleFacts) {
+    match item {
+        rs_ast::Item::Fn(item) => {
+            add_rust_named_export(facts, &item.vis, item.sig.ident.to_string())
+        }
+        rs_ast::Item::Struct(item) => {
+            add_rust_named_export(facts, &item.vis, item.ident.to_string())
+        }
+        rs_ast::Item::Enum(item) => add_rust_named_export(facts, &item.vis, item.ident.to_string()),
+        rs_ast::Item::Trait(item) => {
+            add_rust_named_export(facts, &item.vis, item.ident.to_string())
+        }
+        rs_ast::Item::Type(item) => add_rust_named_export(facts, &item.vis, item.ident.to_string()),
+        rs_ast::Item::Const(item) => {
+            add_rust_named_export(facts, &item.vis, item.ident.to_string())
+        }
+        rs_ast::Item::Static(item) => {
+            add_rust_named_export(facts, &item.vis, item.ident.to_string())
+        }
+        rs_ast::Item::Mod(item) => collect_rust_mod(item, facts),
+        rs_ast::Item::Use(item) => collect_rust_use(item, facts),
+        _ => {}
+    }
+}
+
+#[cfg(feature = "rust")]
+fn collect_rust_mod(item: &rs_ast::ItemMod, facts: &mut ModuleFacts) {
+    let name = item.ident.to_string();
+    if is_public(&item.vis) {
+        facts.exports.push(ExportFact {
+            exported: name.clone(),
+            local: Some(name.clone()),
+            kind: ExportKind::Local,
+        });
+    }
+
+    // A bodyless `mod foo;` is a file dependency on `foo.rs` or `foo/mod.rs`.
+    if item.content.is_none() {
+        facts.imports.push(ImportFact {
+            source: format!("mod:{name}"),
+            local: name,
+            imported: ImportTarget::Namespace,
+            kind: ImportKind::Esm,
+            type_only: false,
+        });
+    }
+}
+
+#[cfg(feature = "rust")]
+fn collect_rust_use(item: &rs_ast::ItemUse, facts: &mut ModuleFacts) {
+    let mut entries = Vec::new();
+    collect_rust_use_tree(Vec::new(), &item.tree, &mut entries);
+    for entry in entries {
+        if is_public(&item.vis) {
+            facts.reexports.push(ReexportFact {
+                source: entry.source,
+                imported: entry.imported,
+                exported: entry.exported,
+                is_ambiguous: entry.is_ambiguous,
+            });
+        } else {
+            facts.imports.push(ImportFact {
+                source: entry.source,
+                local: entry.local,
+                imported: match entry.imported {
+                    ReexportTarget::Name(name) => ImportTarget::Name(name),
+                    ReexportTarget::Namespace | ReexportTarget::All => ImportTarget::Namespace,
+                    ReexportTarget::Default => ImportTarget::Default,
+                },
+                kind: ImportKind::Esm,
+                type_only: false,
+            });
+        }
+    }
+}
+
+#[cfg(feature = "rust")]
+#[derive(Debug)]
+struct RustUseEntry {
+    source: String,
+    imported: ReexportTarget,
+    exported: String,
+    local: String,
+    is_ambiguous: bool,
+}
+
+#[cfg(feature = "rust")]
+fn collect_rust_use_tree(
+    prefix: Vec<String>,
+    tree: &rs_ast::UseTree,
+    entries: &mut Vec<RustUseEntry>,
+) {
+    match tree {
+        rs_ast::UseTree::Path(path) => {
+            let mut next = prefix;
+            next.push(path.ident.to_string());
+            collect_rust_use_tree(next, &path.tree, entries);
+        }
+        rs_ast::UseTree::Name(name) => {
+            let imported = name.ident.to_string();
+            add_rust_use_entry(prefix, imported.clone(), imported, false, entries);
+        }
+        rs_ast::UseTree::Rename(rename) => {
+            add_rust_use_entry(
+                prefix,
+                rename.ident.to_string(),
+                rename.rename.to_string(),
+                false,
+                entries,
+            );
+        }
+        rs_ast::UseTree::Glob(_) => {
+            entries.push(RustUseEntry {
+                source: rust_path_source(&prefix),
+                imported: ReexportTarget::All,
+                exported: "*".to_string(),
+                local: "*".to_string(),
+                is_ambiguous: true,
+            });
+        }
+        rs_ast::UseTree::Group(group) => {
+            for item in &group.items {
+                collect_rust_use_tree(prefix.clone(), item, entries);
+            }
+        }
+    }
+}
+
+#[cfg(feature = "rust")]
+fn add_rust_use_entry(
+    prefix: Vec<String>,
+    imported: String,
+    local: String,
+    is_ambiguous: bool,
+    entries: &mut Vec<RustUseEntry>,
+) {
+    if rust_use_name_is_module(&prefix) {
+        let mut source = prefix;
+        source.push(imported);
+        entries.push(RustUseEntry {
+            source: rust_path_source(&source),
+            imported: ReexportTarget::Namespace,
+            exported: local.clone(),
+            local,
+            is_ambiguous,
+        });
+        return;
+    }
+
+    entries.push(RustUseEntry {
+        source: rust_path_source(&prefix),
+        imported: ReexportTarget::Name(imported),
+        exported: local.clone(),
+        local,
+        is_ambiguous,
+    });
+}
+
+#[cfg(feature = "rust")]
+fn rust_use_name_is_module(prefix: &[String]) -> bool {
+    prefix.is_empty()
+        || prefix
+            .last()
+            .is_some_and(|part| matches!(part.as_str(), "crate" | "self" | "super"))
+}
+
+#[cfg(feature = "rust")]
+fn rust_path_source(prefix: &[String]) -> String {
+    prefix.join("::")
+}
+
+#[cfg(feature = "rust")]
+fn add_rust_named_export(facts: &mut ModuleFacts, vis: &rs_ast::Visibility, name: String) {
+    if !is_public(vis) {
+        return;
+    }
+    facts.exports.push(ExportFact {
+        exported: name.clone(),
+        local: Some(name),
+        kind: ExportKind::Local,
+    });
+}
+
+#[cfg(feature = "rust")]
+fn is_public(vis: &rs_ast::Visibility) -> bool {
+    matches!(vis, rs_ast::Visibility::Public(_))
 }
 
 fn parse_source(path: &Path, source: &str) -> Result<Module> {
@@ -873,6 +1097,47 @@ def send_email(user: User) -> str:
                 .imports
                 .iter()
                 .any(|import| import.source == ".formatting" && import.local == "formatting")
+        );
+    }
+
+    #[cfg(feature = "rust")]
+    #[test]
+    fn parses_rust_imports_exports_and_reexports() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("lib.rs");
+        fs::write(
+            &path,
+            r#"
+pub mod services;
+
+use crate::models::User;
+pub use crate::services::email::send_email;
+
+pub struct App;
+"#,
+        )
+        .unwrap();
+
+        let facts = parse_module(&path).unwrap();
+        assert!(facts.exports.iter().any(|export| export.exported == "App"));
+        assert!(
+            facts
+                .imports
+                .iter()
+                .any(|import| import.source == "mod:services")
+        );
+        assert!(
+            facts
+                .imports
+                .iter()
+                .any(|import| import.source == "crate::models" && import.local == "User")
+        );
+        assert!(
+            facts
+                .reexports
+                .iter()
+                .any(|reexport| reexport.source == "crate::services::email"
+                    && reexport.exported == "send_email")
         );
     }
 }

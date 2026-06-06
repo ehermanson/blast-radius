@@ -44,3 +44,19 @@ jobs:
 
       - name: Stress test FastAPI example
         run: cargo run --features python --bin blast-radius -- --repo-root examples/fastapi file fastapi/applications.py > /dev/null
+
+  rust:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run Rust feature tests
+        run: cargo test --features rust
+
+      - name: Stress test Rust demo
+        run: cargo run --features rust --bin blast-radius -- --repo-root examples/rust-demo file src/utils/formatting.rs > /dev/null

@@ -8,11 +8,18 @@ use serde_json::Value;
 
 use crate::fs::{RepoContext, TsConfigPath};
 
-#[cfg(not(feature = "python"))]
+#[cfg(all(not(feature = "python"), not(feature = "rust")))]
 const RESOLUTION_EXTENSIONS: &[&str] = &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"];
-#[cfg(feature = "python")]
+#[cfg(all(feature = "python", not(feature = "rust")))]
 const RESOLUTION_EXTENSIONS: &[&str] =
     &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "py"];
+#[cfg(all(not(feature = "python"), feature = "rust"))]
+const RESOLUTION_EXTENSIONS: &[&str] =
+    &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "rs"];
+#[cfg(all(feature = "python", feature = "rust"))]
+const RESOLUTION_EXTENSIONS: &[&str] = &[
+    "ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "py", "rs",
+];
 
 #[derive(Debug, Clone)]
 pub struct Resolver {
@@ -88,6 +95,14 @@ impl Resolver {
             return Resolution::Unresolved;
         }
 
+        #[cfg(feature = "rust")]
+        if is_rust_file(&importer) {
+            if let Some(path) = self.resolve_rust_import(&importer, specifier) {
+                return Resolution::Resolved(path);
+            }
+            return Resolution::Unresolved;
+        }
+
         if specifier.starts_with('.') || specifier.starts_with('/') {
             return self.resolve_path(importer.parent().unwrap_or(&self.repo_root), specifier);
         }
@@ -110,6 +125,18 @@ impl Resolver {
                 return true;
             }
             return self.python_top_level_exists(specifier);
+        }
+
+        #[cfg(feature = "rust")]
+        if is_rust_file(importer) {
+            if specifier.starts_with("mod:")
+                || specifier.starts_with("crate::")
+                || specifier.starts_with("self::")
+                || specifier.starts_with("super::")
+            {
+                return true;
+            }
+            return self.rust_top_level_exists(specifier);
         }
 
         if specifier.starts_with('.') || specifier.starts_with('/') {
@@ -186,6 +213,111 @@ impl Resolver {
         let module_file = clean_path(&self.repo_root.join(format!("{first}.py")));
         let package_init = clean_path(&self.repo_root.join(first).join("__init__.py"));
         self.source_files.contains(&module_file) || self.source_files.contains(&package_init)
+    }
+
+    #[cfg(feature = "rust")]
+    fn resolve_rust_import(&self, importer: &Path, specifier: &str) -> Option<PathBuf> {
+        if let Some(module) = specifier.strip_prefix("mod:") {
+            let base = rust_child_module_base(importer);
+            return self.try_resolve_rust_module_candidate(&base.join(module));
+        }
+
+        let parts: Vec<&str> = specifier
+            .split("::")
+            .filter(|part| !part.is_empty())
+            .collect();
+        let (head, rest) = parts.split_first()?;
+
+        match *head {
+            "crate" => self.resolve_rust_from_crate_roots(rest),
+            "self" => {
+                let base = rust_child_module_base(importer).join(rest.join("/"));
+                self.try_resolve_rust_module_candidate(&base)
+            }
+            "super" => {
+                let mut base = rust_parent_module_base(importer);
+                for part in rest {
+                    if *part == "super" {
+                        base.pop();
+                    } else {
+                        base.push(part);
+                    }
+                }
+                self.try_resolve_rust_module_candidate(&base)
+            }
+            _ => {
+                if let Some(path) = self.resolve_rust_from_crate_roots(&parts) {
+                    return Some(path);
+                }
+                let base = rust_child_module_base(importer).join(parts.join("/"));
+                self.try_resolve_rust_module_candidate(&base)
+            }
+        }
+    }
+
+    #[cfg(feature = "rust")]
+    fn resolve_rust_from_crate_roots(&self, parts: &[&str]) -> Option<PathBuf> {
+        if parts.is_empty() {
+            return None;
+        }
+
+        for root in self.rust_crate_roots() {
+            let candidate = root.join(parts.join("/"));
+            if let Some(path) = self.try_resolve_rust_module_candidate(&candidate) {
+                return Some(path);
+            }
+        }
+        None
+    }
+
+    #[cfg(feature = "rust")]
+    fn rust_crate_roots(&self) -> Vec<PathBuf> {
+        let mut roots = Vec::new();
+        for file in &self.source_files {
+            let Some(name) = file.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            if matches!(name, "lib.rs" | "main.rs") {
+                if let Some(parent) = file.parent() {
+                    roots.push(parent.to_path_buf());
+                }
+            }
+        }
+        roots.sort();
+        roots.dedup();
+        if roots.is_empty() {
+            roots.push(self.repo_root.clone());
+        }
+        roots
+    }
+
+    #[cfg(feature = "rust")]
+    fn try_resolve_rust_module_candidate(&self, candidate: &Path) -> Option<PathBuf> {
+        if let Some(path) = self.try_resolve_candidate(candidate) {
+            return Some(path);
+        }
+
+        let mod_file = clean_path(&candidate.join("mod.rs"));
+        if self.source_files.contains(&mod_file) {
+            return Some(mod_file);
+        }
+
+        None
+    }
+
+    #[cfg(feature = "rust")]
+    fn rust_top_level_exists(&self, specifier: &str) -> bool {
+        let Some(first) = specifier.split("::").next() else {
+            return false;
+        };
+        if first.is_empty() {
+            return false;
+        }
+
+        self.rust_crate_roots().into_iter().any(|root| {
+            self.try_resolve_rust_module_candidate(&root.join(first))
+                .is_some()
+        })
     }
 
     fn resolve_tsconfig_alias(&self, importer: &Path, specifier: &str) -> Option<PathBuf> {
@@ -325,6 +457,29 @@ impl Resolver {
 #[cfg(feature = "python")]
 fn is_python_file(path: &Path) -> bool {
     path.extension().and_then(|ext| ext.to_str()) == Some("py")
+}
+
+#[cfg(feature = "rust")]
+fn is_rust_file(path: &Path) -> bool {
+    path.extension().and_then(|ext| ext.to_str()) == Some("rs")
+}
+
+#[cfg(feature = "rust")]
+fn rust_child_module_base(importer: &Path) -> PathBuf {
+    let parent = importer.parent().unwrap_or_else(|| Path::new(""));
+    match importer.file_name().and_then(|name| name.to_str()) {
+        Some("lib.rs" | "main.rs" | "mod.rs") => parent.to_path_buf(),
+        _ => parent.join(importer.file_stem().unwrap_or_default()),
+    }
+}
+
+#[cfg(feature = "rust")]
+fn rust_parent_module_base(importer: &Path) -> PathBuf {
+    let child_base = rust_child_module_base(importer);
+    child_base
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or(child_base)
 }
 
 fn load_package_info(path: &Path) -> Result<Option<PackageInfo>> {
@@ -677,5 +832,53 @@ mod tests {
         assert!(resolver.is_internal_specifier(&importer, "..models"));
         assert!(resolver.is_internal_specifier(&importer, "app.models"));
         assert!(!resolver.is_internal_specifier(&importer, "dataclasses"));
+    }
+
+    #[cfg(feature = "rust")]
+    #[test]
+    fn resolves_rust_crate_super_self_and_mod_imports() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("src/services")).unwrap();
+        fs::create_dir_all(dir.path().join("src/utils")).unwrap();
+        fs::write(dir.path().join("src/lib.rs"), "pub mod services;").unwrap();
+        fs::write(dir.path().join("src/models.rs"), "pub struct User;").unwrap();
+        fs::write(dir.path().join("src/services/mod.rs"), "pub mod email;").unwrap();
+        fs::write(
+            dir.path().join("src/services/email.rs"),
+            "use super::formatter;",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("src/services/formatter.rs"),
+            "pub fn f() {}",
+        )
+        .unwrap();
+        fs::write(dir.path().join("src/utils/mod.rs"), "pub mod formatting;").unwrap();
+        fs::write(dir.path().join("src/utils/formatting.rs"), "pub fn f() {}").unwrap();
+
+        let context = RepoContext::discover(dir.path()).unwrap();
+        let resolver = Resolver::new(&context).unwrap();
+        let lib = dir.path().join("src/lib.rs");
+        let service_mod = dir.path().join("src/services/mod.rs");
+        let email = dir.path().join("src/services/email.rs");
+
+        assert!(matches!(
+            resolver.resolve(&lib, "mod:services"),
+            Resolution::Resolved(path) if path.ends_with("src/services/mod.rs")
+        ));
+        assert!(matches!(
+            resolver.resolve(&lib, "crate::models"),
+            Resolution::Resolved(path) if path.ends_with("src/models.rs")
+        ));
+        assert!(matches!(
+            resolver.resolve(&service_mod, "self::email"),
+            Resolution::Resolved(path) if path.ends_with("src/services/email.rs")
+        ));
+        assert!(matches!(
+            resolver.resolve(&email, "super::formatter"),
+            Resolution::Resolved(path) if path.ends_with("src/services/formatter.rs")
+        ));
+        assert!(resolver.is_internal_specifier(&email, "crate::models"));
+        assert!(!resolver.is_internal_specifier(&email, "serde"));
     }
 }
