@@ -76,3 +76,35 @@ jobs:
 
       - name: Stress test component demo
         run: cargo run --features vue,svelte --bin blast-radius -- --repo-root examples/component-demo file src/shared.ts > /dev/null
+
+  ruby:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run Ruby feature tests
+        run: cargo test --features ruby
+
+      - name: Stress test Ruby demo
+        run: cargo run --features ruby --bin blast-radius -- --repo-root examples/ruby-demo file lib/app/utils/formatter.rb > /dev/null
+
+  java:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run Java feature tests
+        run: cargo test --features java
+
+      - name: Stress test Java demo
+        run: cargo run --features java --bin blast-radius -- --repo-root examples/java-demo file src/main/java/com/example/util/Formatter.java > /dev/null

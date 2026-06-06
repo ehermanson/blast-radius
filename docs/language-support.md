@@ -11,10 +11,12 @@ Current status:
 - Svelte exists behind `--features svelte`.
 - Python exists behind `--features python`.
 - Rust exists behind `--features rust`.
+- Ruby exists behind `--features ruby`.
+- Java exists behind `--features java`.
 - There is no `--language` / `--languages` CLI flag yet; a binary scans the
   languages compiled into it.
 
-The Python and Rust implementations are intentionally conservative and
+The non-JS implementations are intentionally conservative and
 over-approximate import usage to avoid false negatives.
 
 ## Target Architecture
@@ -223,6 +225,61 @@ Definition of done:
 - Done: focused mixed fixture proves Vue -> Svelte -> TS transitive impact.
 - Done: CI has a Vue/Svelte feature build/test job.
 
+## Phase 9: Add Ruby Parser And Resolver
+
+Ruby support uses a lightweight static parser behind the optional `ruby` Cargo
+feature.
+
+Tracked:
+
+- `.rb` files when `ruby` is enabled
+- `require_relative "path"`
+- `require "path"` when it resolves inside the repo
+- top-level `class`, `module`, and `def` names
+
+Skipped initially:
+
+- Rails autoloading and Zeitwerk conventions
+- metaprogramming
+- dynamic `require`
+- precise method/body usage
+
+Definition of done:
+
+- Done: Ruby files are discovered only when Ruby support is enabled.
+- Done: `require_relative` resolves against the importing file.
+- Done: focused Ruby fixture proves transitive impact through service/model
+  files.
+- Done: CI has a Ruby feature build/test job.
+
+## Phase 10: Add Java Parser And Resolver
+
+Java support uses a lightweight static parser behind the optional `java` Cargo
+feature.
+
+Tracked:
+
+- `.java` files when `java` is enabled
+- `package` declarations for context
+- `import package.Type`
+- `import static package.Type.member`
+- top-level `class`, `interface`, `enum`, and `record` names
+
+Skipped initially:
+
+- Maven/Gradle source-set metadata
+- wildcard import precision beyond package-level resolution
+- annotation processors/generated sources
+- precise method/body usage
+
+Definition of done:
+
+- Done: Java files are discovered only when Java support is enabled.
+- Done: package-style imports resolve to matching source files.
+- Done: focused Java fixture proves transitive impact through service/model
+  files.
+- Done: CI has a Java feature build/test job.
+
 ## Suggested First Implementation Tasks
 
 1. Introduce `LanguageAdapter` and move JS/TS parser selection behind it.
@@ -244,3 +301,7 @@ Definition of done:
 17. Extract component script blocks and parse them through SWC.
 18. Add component default exports and mixed component fixtures.
 19. Add CI job for `cargo test --features vue,svelte`.
+20. Add `ruby` and `java` feature flags.
+21. Parse Ruby `require` / `require_relative` and public-ish symbols.
+22. Parse Java imports and top-level type declarations.
+23. Add Ruby and Java fixtures, examples, stress commands, and CI jobs.

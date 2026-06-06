@@ -13,6 +13,8 @@
 - Optional Svelte component support behind `--features svelte`
 - Optional Python support behind `--features python`
 - Optional Rust support behind `--features rust`
+- Optional Ruby support behind `--features ruby`
+- Optional Java support behind `--features java`
 - Terminal tree, JSON, Mermaid, and Graphviz DOT output
 - At-a-glance risk verdict (minor / moderate / risky / high) with impacted files listed per package
 - Multi-file `diff` runs (e.g. a pre-commit/pre-push hook over staged files) show a combined verdict plus a per-file breakdown
@@ -48,8 +50,14 @@ cargo build --features rust
 # JS/TS + Vue + Svelte
 cargo build --features vue,svelte
 
+# JS/TS + Ruby
+cargo build --features ruby
+
+# JS/TS + Java
+cargo build --features java
+
 # JS/TS + every optional adapter
-cargo build --features python,rust,vue,svelte
+cargo build --features python,rust,vue,svelte,ruby,java
 ```
 
 There is no `--language` or `--languages` CLI flag yet. A binary scans whatever
@@ -81,6 +89,11 @@ file types were compiled into it.
 - `examples/component-demo`
   A small mixed Vue/Svelte fixture that exercises component script imports and
   default component imports.
+- `examples/ruby-demo`
+  A small Ruby project that exercises `require_relative`, classes, modules, and
+  methods.
+- `examples/java-demo`
+  A small Java project that exercises packages, imports, and public classes.
 
 Example run:
 
@@ -117,6 +130,12 @@ cargo run --features rust --bin blast-radius -- --repo-root examples/rust-demo f
 
 # Analyze a mixed Vue/Svelte component fixture
 cargo run --features vue,svelte --bin blast-radius -- --repo-root examples/component-demo file src/shared.ts
+
+# Analyze a Ruby fixture
+cargo run --features ruby --bin blast-radius -- --repo-root examples/ruby-demo file lib/app/utils/formatter.rb
+
+# Analyze a Java fixture
+cargo run --features java --bin blast-radius -- --repo-root examples/java-demo file src/main/java/com/example/util/Formatter.java
 ```
 
 ## Development
@@ -130,6 +149,8 @@ make test
 make test-python
 make test-rust
 make test-components
+make test-ruby
+make test-java
 make test-all-languages
 make coverage
 make coverage-gate
@@ -138,6 +159,8 @@ make stress-python-demo
 make stress-fastapi
 make stress-rust-demo
 make stress-components
+make stress-ruby-demo
+make stress-java-demo
 make smoke-mui
 make perf
 make metrics
@@ -145,6 +168,8 @@ make quality
 make quality-python
 make quality-rust
 make quality-components
+make quality-ruby
+make quality-java
 ```
 
 See `docs/quality.md` for what each command validates.

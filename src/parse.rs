@@ -102,6 +102,16 @@ pub fn parse_module(path: &Path) -> Result<ModuleFacts> {
         return parse_component_module(path, &source, "svelte");
     }
 
+    #[cfg(feature = "ruby")]
+    if path.extension().and_then(|ext| ext.to_str()) == Some("rb") {
+        return parse_ruby_module(path, &source);
+    }
+
+    #[cfg(feature = "java")]
+    if path.extension().and_then(|ext| ext.to_str()) == Some("java") {
+        return parse_java_module(path, &source);
+    }
+
     parse_javascript_module(path, &source)
 }
 
@@ -638,6 +648,202 @@ fn add_rust_named_export(facts: &mut ModuleFacts, vis: &rs_ast::Visibility, name
 #[cfg(feature = "rust")]
 fn is_public(vis: &rs_ast::Visibility) -> bool {
     matches!(vis, rs_ast::Visibility::Public(_))
+}
+
+#[cfg(feature = "ruby")]
+fn parse_ruby_module(path: &Path, source: &str) -> Result<ModuleFacts> {
+    let mut facts = ModuleFacts {
+        file: path.to_path_buf(),
+        exports: Vec::new(),
+        imports: Vec::new(),
+        reexports: Vec::new(),
+        used_locals: BTreeSet::new(),
+        namespace_member_usage: BTreeMap::new(),
+        warnings: Vec::new(),
+    };
+
+    for line in source.lines() {
+        let line = line.trim();
+        if line.starts_with('#') || line.is_empty() {
+            continue;
+        }
+
+        if let Some(source) = ruby_required_path(line, "require_relative") {
+            add_ruby_import(&mut facts, ruby_relative_source(&source));
+            continue;
+        }
+
+        if let Some(source) = ruby_required_path(line, "require") {
+            add_ruby_import(&mut facts, source);
+            continue;
+        }
+
+        if let Some(name) = ruby_declared_constant(line, "class") {
+            add_ruby_export(&mut facts, name);
+            continue;
+        }
+
+        if let Some(name) = ruby_declared_constant(line, "module") {
+            add_ruby_export(&mut facts, name);
+            continue;
+        }
+
+        if let Some(name) = ruby_declared_method(line) {
+            add_ruby_export(&mut facts, name);
+        }
+    }
+
+    facts
+        .used_locals
+        .extend(facts.imports.iter().map(|import| import.local.clone()));
+    Ok(facts)
+}
+
+#[cfg(feature = "ruby")]
+fn ruby_required_path(line: &str, keyword: &str) -> Option<String> {
+    let rest = line.strip_prefix(keyword)?.trim_start();
+    let quote = rest.chars().next()?;
+    if quote != '\'' && quote != '"' {
+        return None;
+    }
+    let value = &rest[quote.len_utf8()..];
+    let end = value.find(quote)?;
+    Some(value[..end].to_string())
+}
+
+#[cfg(feature = "ruby")]
+fn ruby_relative_source(source: &str) -> String {
+    if source.starts_with('.') {
+        source.to_string()
+    } else {
+        format!("./{source}")
+    }
+}
+
+#[cfg(feature = "ruby")]
+fn add_ruby_import(facts: &mut ModuleFacts, source: String) {
+    let local = source
+        .rsplit('/')
+        .next()
+        .unwrap_or(&source)
+        .trim_end_matches(".rb")
+        .to_string();
+    facts.imports.push(ImportFact {
+        source,
+        local,
+        imported: ImportTarget::Namespace,
+        kind: ImportKind::Esm,
+        type_only: false,
+    });
+}
+
+#[cfg(feature = "ruby")]
+fn ruby_declared_constant(line: &str, keyword: &str) -> Option<String> {
+    let rest = line.strip_prefix(keyword)?.trim_start();
+    let name = rest
+        .split(|ch: char| ch.is_whitespace() || ch == '<' || ch == ';')
+        .next()?;
+    if name.is_empty() {
+        return None;
+    }
+    Some(name.rsplit("::").next().unwrap_or(name).to_string())
+}
+
+#[cfg(feature = "ruby")]
+fn ruby_declared_method(line: &str) -> Option<String> {
+    let rest = line.strip_prefix("def ")?.trim_start();
+    let name = rest
+        .split(|ch: char| ch.is_whitespace() || ch == '(' || ch == ';')
+        .next()?;
+    if name.is_empty() {
+        return None;
+    }
+    Some(name.rsplit('.').next().unwrap_or(name).to_string())
+}
+
+#[cfg(feature = "ruby")]
+fn add_ruby_export(facts: &mut ModuleFacts, name: String) {
+    facts.exports.push(ExportFact {
+        exported: name.clone(),
+        local: Some(name),
+        kind: ExportKind::Local,
+    });
+}
+
+#[cfg(feature = "java")]
+fn parse_java_module(path: &Path, source: &str) -> Result<ModuleFacts> {
+    let mut facts = ModuleFacts {
+        file: path.to_path_buf(),
+        exports: Vec::new(),
+        imports: Vec::new(),
+        reexports: Vec::new(),
+        used_locals: BTreeSet::new(),
+        namespace_member_usage: BTreeMap::new(),
+        warnings: Vec::new(),
+    };
+
+    for line in source.lines() {
+        let line = line.trim();
+        if line.starts_with("//") || line.is_empty() {
+            continue;
+        }
+
+        if let Some(import) = java_import(line) {
+            let local = import
+                .rsplit('.')
+                .next()
+                .unwrap_or(&import)
+                .trim_end_matches(".*")
+                .to_string();
+            let imported = if import.ends_with(".*") {
+                ImportTarget::Namespace
+            } else {
+                ImportTarget::Name(local.clone())
+            };
+            facts.imports.push(ImportFact {
+                source: import,
+                local,
+                imported,
+                kind: ImportKind::Esm,
+                type_only: false,
+            });
+            continue;
+        }
+
+        if let Some(name) = java_declared_type(line) {
+            facts.exports.push(ExportFact {
+                exported: name.clone(),
+                local: Some(name),
+                kind: ExportKind::Local,
+            });
+        }
+    }
+
+    facts
+        .used_locals
+        .extend(facts.imports.iter().map(|import| import.local.clone()));
+    Ok(facts)
+}
+
+#[cfg(feature = "java")]
+fn java_import(line: &str) -> Option<String> {
+    let rest = line.strip_prefix("import ")?.trim_start();
+    let rest = rest.strip_prefix("static ").unwrap_or(rest).trim_start();
+    Some(rest.trim_end_matches(';').trim().to_string())
+}
+
+#[cfg(feature = "java")]
+fn java_declared_type(line: &str) -> Option<String> {
+    let tokens: Vec<&str> = line
+        .split(|ch: char| ch.is_whitespace() || ch == '{' || ch == '<')
+        .filter(|token| !token.is_empty())
+        .collect();
+    for pair in tokens.windows(2) {
+        if matches!(pair[0], "class" | "interface" | "enum" | "record") {
+            return Some(pair[1].to_string());
+        }
+    }
+    None
 }
 
 fn parse_source(path: &Path, source: &str) -> Result<Module> {
@@ -1293,6 +1499,77 @@ const label = formatLabel('save')
                 .exports
                 .iter()
                 .any(|export| export.exported == "default")
+        );
+    }
+
+    #[cfg(feature = "ruby")]
+    #[test]
+    fn parses_ruby_requires_and_exports() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("email_service.rb");
+        fs::write(
+            &path,
+            r#"
+require_relative "../models/user"
+
+class EmailService
+  def self.send_email(email)
+  end
+end
+"#,
+        )
+        .unwrap();
+
+        let facts = parse_module(&path).unwrap();
+        assert!(
+            facts
+                .imports
+                .iter()
+                .any(|import| import.source == "../models/user")
+        );
+        assert!(
+            facts
+                .exports
+                .iter()
+                .any(|export| export.exported == "EmailService")
+        );
+        assert!(
+            facts
+                .exports
+                .iter()
+                .any(|export| export.exported == "send_email")
+        );
+    }
+
+    #[cfg(feature = "java")]
+    #[test]
+    fn parses_java_imports_and_exports() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("EmailService.java");
+        fs::write(
+            &path,
+            r#"
+package com.example.service;
+
+import com.example.model.User;
+
+public class EmailService {}
+"#,
+        )
+        .unwrap();
+
+        let facts = parse_module(&path).unwrap();
+        assert!(
+            facts
+                .imports
+                .iter()
+                .any(|import| import.source == "com.example.model.User" && import.local == "User")
+        );
+        assert!(
+            facts
+                .exports
+                .iter()
+                .any(|export| export.exported == "EmailService")
         );
     }
 }

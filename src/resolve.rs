@@ -93,6 +93,22 @@ impl Resolver {
             return Resolution::Unresolved;
         }
 
+        #[cfg(feature = "ruby")]
+        if is_ruby_file(&importer) {
+            if let Some(path) = self.resolve_ruby_import(&importer, specifier) {
+                return Resolution::Resolved(path);
+            }
+            return Resolution::Unresolved;
+        }
+
+        #[cfg(feature = "java")]
+        if is_java_file(&importer) {
+            if let Some(path) = self.resolve_java_import(specifier) {
+                return Resolution::Resolved(path);
+            }
+            return Resolution::Unresolved;
+        }
+
         if specifier.starts_with('.') || specifier.starts_with('/') {
             return self.resolve_path(importer.parent().unwrap_or(&self.repo_root), specifier);
         }
@@ -127,6 +143,17 @@ impl Resolver {
                 return true;
             }
             return self.rust_top_level_exists(specifier);
+        }
+
+        #[cfg(feature = "ruby")]
+        if is_ruby_file(importer) {
+            return specifier.starts_with('.')
+                || self.resolve_ruby_import(importer, specifier).is_some();
+        }
+
+        #[cfg(feature = "java")]
+        if is_java_file(importer) {
+            return self.resolve_java_import(specifier).is_some();
         }
 
         if specifier.starts_with('.') || specifier.starts_with('/') {
@@ -310,6 +337,48 @@ impl Resolver {
         })
     }
 
+    #[cfg(feature = "ruby")]
+    fn resolve_ruby_import(&self, importer: &Path, specifier: &str) -> Option<PathBuf> {
+        if specifier.starts_with('.') {
+            let base = importer.parent().unwrap_or(&self.repo_root);
+            return self.try_resolve_candidate(&base.join(specifier));
+        }
+
+        for candidate in [
+            self.repo_root.join(specifier),
+            self.repo_root.join("lib").join(specifier),
+            self.repo_root.join("app").join(specifier),
+        ] {
+            if let Some(path) = self.try_resolve_candidate(&candidate) {
+                return Some(path);
+            }
+        }
+
+        let suffix = PathBuf::from(format!("{specifier}.rb"));
+        self.source_files
+            .iter()
+            .find(|file| file.ends_with(&suffix))
+            .cloned()
+    }
+
+    #[cfg(feature = "java")]
+    fn resolve_java_import(&self, specifier: &str) -> Option<PathBuf> {
+        if specifier.ends_with(".*") {
+            let package_path = specifier.trim_end_matches(".*").replace('.', "/");
+            return self.source_files.iter().find_map(|file| {
+                file.parent()
+                    .filter(|parent| parent.ends_with(&package_path))
+                    .map(|_| file.clone())
+            });
+        }
+
+        let suffix = PathBuf::from(format!("{}.java", specifier.replace('.', "/")));
+        self.source_files
+            .iter()
+            .find(|file| file.ends_with(&suffix))
+            .cloned()
+    }
+
     fn resolve_tsconfig_alias(&self, importer: &Path, specifier: &str) -> Option<PathBuf> {
         let tsconfig = self.nearest_tsconfig(importer)?;
         let tsconfig_dir = tsconfig.path.parent()?;
@@ -468,7 +537,23 @@ fn resolution_extensions() -> Vec<&'static str> {
     if cfg!(feature = "svelte") {
         extensions.push("svelte");
     }
+    if cfg!(feature = "ruby") {
+        extensions.push("rb");
+    }
+    if cfg!(feature = "java") {
+        extensions.push("java");
+    }
     extensions
+}
+
+#[cfg(feature = "ruby")]
+fn is_ruby_file(path: &Path) -> bool {
+    path.extension().and_then(|ext| ext.to_str()) == Some("rb")
+}
+
+#[cfg(feature = "java")]
+fn is_java_file(path: &Path) -> bool {
+    path.extension().and_then(|ext| ext.to_str()) == Some("java")
 }
 
 #[cfg(feature = "rust")]

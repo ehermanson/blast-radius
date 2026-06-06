@@ -131,6 +131,8 @@ fn is_source_file(path: &Path) -> bool {
         || is_rust_source_extension(ext)
         || is_vue_source_extension(ext)
         || is_svelte_source_extension(ext)
+        || is_ruby_source_extension(ext)
+        || is_java_source_extension(ext)
 }
 
 #[cfg(feature = "python")]
@@ -170,6 +172,26 @@ fn is_svelte_source_extension(ext: &str) -> bool {
 
 #[cfg(not(feature = "svelte"))]
 fn is_svelte_source_extension(_: &str) -> bool {
+    false
+}
+
+#[cfg(feature = "ruby")]
+fn is_ruby_source_extension(ext: &str) -> bool {
+    ext == "rb"
+}
+
+#[cfg(not(feature = "ruby"))]
+fn is_ruby_source_extension(_: &str) -> bool {
+    false
+}
+
+#[cfg(feature = "java")]
+fn is_java_source_extension(ext: &str) -> bool {
+    ext == "java"
+}
+
+#[cfg(not(feature = "java"))]
+fn is_java_source_extension(_: &str) -> bool {
     false
 }
 
@@ -217,6 +239,8 @@ mod tests {
             "<script>import x from './x'</script>",
         )
         .unwrap();
+        fs::write(dir.path().join("src").join("user.rb"), "class User; end").unwrap();
+        fs::write(dir.path().join("src").join("User.java"), "class User {}").unwrap();
         fs::write(dir.path().join("package.json"), r#"{"name":"fixture"}"#).unwrap();
 
         let repo = RepoContext::discover(dir.path()).unwrap();
@@ -232,6 +256,12 @@ mod tests {
             expected += 1;
         }
         if cfg!(feature = "svelte") {
+            expected += 1;
+        }
+        if cfg!(feature = "ruby") {
+            expected += 1;
+        }
+        if cfg!(feature = "java") {
             expected += 1;
         }
         assert_eq!(repo.source_files.len(), expected);
@@ -289,6 +319,30 @@ mod tests {
             "<script></script>",
         )
         .unwrap();
+
+        let repo = RepoContext::discover(dir.path()).unwrap();
+
+        assert_eq!(repo.source_files.len(), 1);
+    }
+
+    #[cfg(feature = "ruby")]
+    #[test]
+    fn discovers_ruby_sources_when_enabled() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("lib")).unwrap();
+        fs::write(dir.path().join("lib").join("user.rb"), "class User; end").unwrap();
+
+        let repo = RepoContext::discover(dir.path()).unwrap();
+
+        assert_eq!(repo.source_files.len(), 1);
+    }
+
+    #[cfg(feature = "java")]
+    #[test]
+    fn discovers_java_sources_when_enabled() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::write(dir.path().join("src").join("User.java"), "class User {}").unwrap();
 
         let repo = RepoContext::discover(dir.path()).unwrap();
 

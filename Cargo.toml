@@ -13,6 +13,8 @@ python = ["dep:rustpython-parser"]
 rust = ["dep:syn"]
 vue = []
 svelte = []
+ruby = []
+java = []
 
 [dependencies]
 anyhow = "1.0"

@@ -35,6 +35,16 @@ fn component_fixture_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/components")
 }
 
+#[cfg(feature = "ruby")]
+fn ruby_fixture_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ruby")
+}
+
+#[cfg(feature = "java")]
+fn java_fixture_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/java")
+}
+
 fn copy_dir(from: &Path, to: &Path) {
     fs::create_dir_all(to).unwrap();
     for entry in fs::read_dir(from).unwrap() {
@@ -709,4 +719,88 @@ fn component_file_mode_tracks_default_component_imports() {
 
     assert!(labels.iter().any(|label| label == "src/Card.svelte"));
     assert!(labels.iter().any(|label| label == "src/App.ts"));
+}
+
+#[cfg(feature = "ruby")]
+#[test]
+fn ruby_file_mode_reports_transitive_blast_radius() {
+    let repo = ruby_fixture_root();
+
+    let output = AssertCommand::cargo_bin("blast-radius")
+        .unwrap()
+        .current_dir(&repo)
+        .args([
+            "--repo-root",
+            repo.to_str().unwrap(),
+            "--format",
+            "json",
+            "file",
+            "lib/app/utils/formatter.rb",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let json: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(json["summary"]["parse_failures"].as_u64().unwrap(), 0);
+    assert_eq!(json["summary"]["unresolved_imports"].as_u64().unwrap(), 0);
+    let labels: Vec<String> = json["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|node| node["label"].as_str().map(ToOwned::to_owned))
+        .collect();
+
+    assert!(
+        labels
+            .iter()
+            .any(|label| label == "lib/app/services/email_service.rb")
+    );
+    assert!(labels.iter().any(|label| label == "lib/app.rb"));
+}
+
+#[cfg(feature = "java")]
+#[test]
+fn java_file_mode_reports_transitive_blast_radius() {
+    let repo = java_fixture_root();
+
+    let output = AssertCommand::cargo_bin("blast-radius")
+        .unwrap()
+        .current_dir(&repo)
+        .args([
+            "--repo-root",
+            repo.to_str().unwrap(),
+            "--format",
+            "json",
+            "file",
+            "src/main/java/com/example/util/Formatter.java",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let json: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(json["summary"]["parse_failures"].as_u64().unwrap(), 0);
+    assert_eq!(json["summary"]["unresolved_imports"].as_u64().unwrap(), 0);
+    let labels: Vec<String> = json["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|node| node["label"].as_str().map(ToOwned::to_owned))
+        .collect();
+
+    assert!(
+        labels
+            .iter()
+            .any(|label| label == "src/main/java/com/example/service/EmailService.java")
+    );
+    assert!(
+        labels
+            .iter()
+            .any(|label| label == "src/main/java/com/example/App.java")
+    );
 }
