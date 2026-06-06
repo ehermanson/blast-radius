@@ -40,6 +40,7 @@ pub struct ImportFact {
     pub local: String,
     pub imported: ImportTarget,
     pub kind: ImportKind,
+    pub type_only: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -212,6 +213,7 @@ fn collect_import_decl(import: &ImportDecl, facts: &mut ModuleFacts) {
                     local: named.local.sym.to_string(),
                     imported: ImportTarget::Name(imported),
                     kind: ImportKind::Esm,
+                    type_only: import.type_only || named.is_type_only,
                 });
             }
             ImportSpecifier::Default(default) => facts.imports.push(ImportFact {
@@ -219,12 +221,14 @@ fn collect_import_decl(import: &ImportDecl, facts: &mut ModuleFacts) {
                 local: default.local.sym.to_string(),
                 imported: ImportTarget::Default,
                 kind: ImportKind::Esm,
+                type_only: import.type_only,
             }),
             ImportSpecifier::Namespace(namespace) => facts.imports.push(ImportFact {
                 source: source.clone(),
                 local: namespace.local.sym.to_string(),
                 imported: ImportTarget::Namespace,
                 kind: ImportKind::Esm,
+                type_only: import.type_only,
             }),
         }
     }
@@ -359,6 +363,7 @@ fn collect_require_import(name: &Pat, init: &Expr, facts: &mut ModuleFacts) {
             local: binding.id.sym.to_string(),
             imported: ImportTarget::Default,
             kind: ImportKind::CommonJs,
+            type_only: false,
         }),
         Pat::Object(object) => {
             for prop in &object.props {
@@ -368,6 +373,7 @@ fn collect_require_import(name: &Pat, init: &Expr, facts: &mut ModuleFacts) {
                         local: assign.key.sym.to_string(),
                         imported: ImportTarget::Name(assign.key.sym.to_string()),
                         kind: ImportKind::CommonJs,
+                        type_only: false,
                     }),
                     ObjectPatProp::KeyValue(key_value) => {
                         let Some(imported_name) = prop_name_to_string(&key_value.key) else {
@@ -381,6 +387,7 @@ fn collect_require_import(name: &Pat, init: &Expr, facts: &mut ModuleFacts) {
                                 local,
                                 imported: ImportTarget::Name(imported_name.clone()),
                                 kind: ImportKind::CommonJs,
+                                type_only: false,
                             });
                         }
                     }

@@ -934,11 +934,48 @@ fn count_unresolved_imports(
             module
                 .imports
                 .iter()
-                .map(move |import| (&module.file, &import.source))
+                .map(move |import| (&module.file, import))
         })
-        .filter(|(file, source)| resolver.is_internal_specifier(file, source))
-        .filter(|(file, source)| matches!(resolver.resolve(file, source), Resolution::Unresolved))
+        .filter(|(_file, import)| should_count_unresolved_import(import))
+        .filter(|(file, import)| resolver.is_internal_specifier(file, &import.source))
+        .filter(|(file, import)| {
+            matches!(
+                resolver.resolve(file, &import.source),
+                Resolution::Unresolved
+            )
+        })
         .count()
+}
+
+fn should_count_unresolved_import(import: &crate::parse::ImportFact) -> bool {
+    if import.type_only {
+        return false;
+    }
+
+    let source = import.source.as_str();
+    if source.contains(".velite") {
+        return false;
+    }
+    if source.contains("/+types/") || source.starts_with("./+types/") {
+        return false;
+    }
+    if source.ends_with("package.json") {
+        return false;
+    }
+    if source.ends_with(".svg") {
+        return false;
+    }
+    if source.contains("styled-system/recipes")
+        || source.contains("styled-system/patterns")
+        || source.contains("styled-system/css")
+    {
+        return false;
+    }
+    if source.contains("/dist/esm/") || source.contains("/dist/cjs/") {
+        return false;
+    }
+
+    true
 }
 
 fn file_id(path: &Path) -> String {

@@ -376,7 +376,7 @@ fn chakra_ui_example_analyzes_real_world_repo() {
     let json: Value = serde_json::from_slice(&output).unwrap();
     assert_eq!(json["summary"]["parse_failures"].as_u64().unwrap(), 0);
     assert!(json["summary"]["total_affected_files"].as_u64().unwrap() > 100);
-    assert!(json["summary"]["unresolved_imports"].as_u64().unwrap() > 0);
+    assert!(json["summary"]["unresolved_imports"].as_u64().unwrap() <= 1);
     let labels: Vec<String> = json["nodes"]
         .as_array()
         .unwrap()
