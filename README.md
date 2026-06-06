@@ -48,6 +48,25 @@ Example run:
 cargo run -- --repo-root examples/monorepo-demo export packages/ui/src/Button.tsx Button
 ```
 
+More example runs:
+
+```bash
+# Analyze a single file in the small monorepo fixture
+cargo run -- --repo-root examples/monorepo-demo file apps/storefront/src/App.tsx
+
+# Analyze a symbol export in the small monorepo fixture
+cargo run -- --repo-root examples/monorepo-demo export packages/ui/src/Button.tsx Button
+
+# Analyze a real Vite React app file
+cargo run -- --repo-root examples/vite-react-ts file src/App.tsx
+
+# Stress test against a larger React monorepo
+cargo run -- --repo-root examples/chakra-ui file packages/react/src/components/button/button.tsx
+
+# Show the full cascade tree for the same Chakra UI file
+cargo run -- --repo-root examples/chakra-ui --verbose file packages/react/src/components/button/button.tsx
+```
+
 ## Development
 
 This project expects a Rust toolchain with `cargo` available locally.
