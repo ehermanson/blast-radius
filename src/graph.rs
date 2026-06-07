@@ -117,7 +117,6 @@ pub struct GraphNode {
 pub enum NodeKind {
     File,
     Export,
-    Usage,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -136,7 +135,6 @@ pub enum EdgeKind {
     ImportsNamespace,
     ReexportsNamed,
     ReexportsStar,
-    UsesIdentifier,
     UsesJsxComponent,
     RequiresModule,
     CommonJsExport,

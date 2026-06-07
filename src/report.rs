@@ -692,7 +692,6 @@ fn is_transparent_node(node: &GraphNode, root_node: &GraphNode, result: &Analysi
     match node.kind {
         NodeKind::Export => true,
         NodeKind::File => is_barrel_passthrough(node, result),
-        NodeKind::Usage => false,
     }
 }
 
@@ -823,7 +822,6 @@ fn edge_label(kind: EdgeKind, is_ambiguous: bool, theme: &Theme) -> String {
         EdgeKind::ImportsNamespace => "namespace import",
         EdgeKind::ReexportsNamed => "re-export",
         EdgeKind::ReexportsStar => "export *",
-        EdgeKind::UsesIdentifier => "identifier use",
         EdgeKind::UsesJsxComponent => "component use",
         EdgeKind::RequiresModule => "require",
         EdgeKind::CommonJsExport => "re-exported local",
@@ -840,7 +838,6 @@ fn format_node(node: &GraphNode, theme: &Theme) -> String {
     let icon = match node.kind {
         NodeKind::File => "ƒ",
         NodeKind::Export => "⇢",
-        NodeKind::Usage => "•",
     };
 
     match node.kind {
@@ -861,7 +858,6 @@ fn format_node(node: &GraphNode, theme: &Theme) -> String {
                 theme.symbol(symbol.unwrap_or(""))
             )
         }
-        NodeKind::Usage => format!("{} {}", theme.muted(icon), theme.muted(&node.label)),
     }
 }
 
@@ -904,7 +900,6 @@ fn count_node_kinds(result: &AnalysisResult) -> NodeCounts {
         match node.kind {
             NodeKind::File => counts.files += 1,
             NodeKind::Export => counts.exports += 1,
-            NodeKind::Usage => {}
         }
     }
     counts

@@ -52,7 +52,6 @@ struct ImpactReason {
 struct AffectedState {
     depth: usize,
     affected_exports: BTreeSet<String>,
-    affects_runtime: bool,
     file_affected: bool,
 }
 
@@ -119,7 +118,7 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
                 parse_warnings,
                 parse_failures,
                 unresolved_imports,
-                vec![(file, exports, true)],
+                vec![(file, exports)],
             )
         }
         Command::File { file } => {
@@ -152,7 +151,7 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
                 parse_warnings,
                 parse_failures,
                 unresolved_imports,
-                vec![(file, exports, true)],
+                vec![(file, exports)],
             )
         }
         Command::Files { files } => {
@@ -176,7 +175,7 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
                         }
                     })
                     .unwrap_or_else(|| BTreeSet::from([String::from("*file*")]));
-                roots.push((file.clone(), exports, true));
+                roots.push((file.clone(), exports));
                 normalized.push(file);
             }
 
@@ -341,7 +340,7 @@ fn analyze_from_roots(
     mut warnings: Vec<String>,
     parse_failures: usize,
     unresolved_imports: usize,
-    roots: Vec<(PathBuf, BTreeSet<String>, bool)>,
+    roots: Vec<(PathBuf, BTreeSet<String>)>,
 ) -> Result<AnalysisResult> {
     let ambiguous_edges = modules
         .values()
@@ -412,7 +411,7 @@ fn analyze_from_roots(
 /// Walk the reverse-dependency graph from a set of roots, returning the affected
 /// files (with depth) and the edges that explain each impact.
 fn run_bfs(
-    roots: &[(PathBuf, BTreeSet<String>, bool)],
+    roots: &[(PathBuf, BTreeSet<String>)],
     modules: &BTreeMap<PathBuf, ModuleFacts>,
     module_states: &BTreeMap<PathBuf, ModuleState>,
     reverse: &BTreeMap<PathBuf, Vec<ConsumerLink>>,
@@ -421,15 +420,13 @@ fn run_bfs(
     let mut queue = VecDeque::new();
     let mut reasons: Vec<ImpactReason> = Vec::new();
 
-    for (file, exports, affects_runtime) in roots {
+    for (file, exports) in roots {
         let entry = states.entry(file.clone()).or_insert(AffectedState {
             depth: 0,
             affected_exports: BTreeSet::new(),
-            affects_runtime: *affects_runtime,
             file_affected: true,
         });
         entry.affected_exports.extend(exports.clone());
-        entry.affects_runtime |= *affects_runtime;
         entry.file_affected = true;
         queue.push_back(file.clone());
     }
@@ -531,7 +528,6 @@ fn run_bfs(
                 .or_insert(AffectedState {
                     depth: next_depth,
                     affected_exports: BTreeSet::new(),
-                    affects_runtime: false,
                     file_affected: false,
                 });
 
@@ -574,7 +570,7 @@ fn run_bfs(
 /// Compute each input file's individual blast radius by running the walk from
 /// that single file. Sorted by reach, widest first.
 fn compute_root_impacts(
-    roots: &[(PathBuf, BTreeSet<String>, bool)],
+    roots: &[(PathBuf, BTreeSet<String>)],
     modules: &BTreeMap<PathBuf, ModuleFacts>,
     module_states: &BTreeMap<PathBuf, ModuleState>,
     reverse: &BTreeMap<PathBuf, Vec<ConsumerLink>>,
