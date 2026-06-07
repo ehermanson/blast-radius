@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/blast-radius-aggressive.png" alt="blast-radius logo" width="520">
+</p>
+
 # blast-radius
 
 `blast-radius` is a Rust CLI for estimating the transitive impact of frontend code changes across a repository.
@@ -27,10 +31,50 @@ blast-radius export packages/ui/src/Button.tsx Button
 blast-radius file packages/ui/src/Button.tsx
 blast-radius files packages/ui/src/Button.tsx packages/ui/src/Card.tsx
 blast-radius diff origin/main...HEAD
+blast-radius init
 ```
 
 `files` takes a list of paths and reports each file's blast radius plus a combined
 total — handy in a pre-commit hook, where lint-staged passes staged files as args.
+
+## Local Pipeline Usage
+
+The simple setup is:
+
+```bash
+cargo install --path .
+blast-radius init
+```
+
+That installs a non-blocking `pre-push` hook at `.git/hooks/pre-push`. It warns
+about broad changes before push, but it does not block your workflow.
+
+Install with optional frontend component support first if the repo uses Vue or
+Svelte:
+
+```bash
+cargo install --path . --features vue,svelte
+blast-radius init
+```
+
+Common setup options:
+
+```bash
+# Check staged files before commit instead of branch diff before push
+blast-radius init --hook pre-commit
+
+# Use a different comparison range for pre-push
+blast-radius init --base main...HEAD
+
+# Make the hook blocking once the team trusts the signal
+blast-radius init --blocking --fail-threshold 25
+
+# Replace an existing blast-radius hook
+blast-radius init --force
+```
+
+See `docs/local-toolchain.md` for hook-manager examples with `lint-staged`,
+Husky, Lefthook, and the `pre-commit` framework.
 
 ## Language Support
 

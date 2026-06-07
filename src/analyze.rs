@@ -66,6 +66,7 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
     let parse_failures = parse_warnings.len();
 
     match &cli.command {
+        Command::Init { .. } => bail!("init does not run analysis"),
         Command::Export { file, export_name } => {
             let file = normalize_input_path(&context.repo_root, file)?;
             if !modules.contains_key(&file) {

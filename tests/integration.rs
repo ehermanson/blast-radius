@@ -1,4 +1,5 @@
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -66,6 +67,14 @@ fn setup_repo() -> tempfile::TempDir {
     dir
 }
 
+fn init_git_repo(path: &Path) {
+    Command::new("git")
+        .arg("init")
+        .current_dir(path)
+        .output()
+        .unwrap();
+}
+
 #[test]
 fn export_mode_reports_transitive_blast_radius() {
     let repo = setup_repo();
@@ -128,6 +137,77 @@ fn export_mode_reports_transitive_blast_radius() {
     );
 
     assert_eq!(json["summary"]["unresolved_imports"].as_u64().unwrap(), 0);
+}
+
+#[test]
+fn init_installs_non_blocking_pre_push_hook_by_default() {
+    let repo = setup_repo();
+    init_git_repo(repo.path());
+
+    AssertCommand::cargo_bin("blast-radius")
+        .unwrap()
+        .current_dir(repo.path())
+        .args(["--repo-root", repo.path().to_str().unwrap(), "init"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("non-blocking"))
+        .stdout(predicate::str::contains(".git/hooks/pre-push"));
+
+    let hook = repo.path().join(".git/hooks/pre-push");
+    let script = fs::read_to_string(&hook).unwrap();
+    assert!(script.contains("blast-radius --repo-root . diff \"$base\" || true"));
+    assert!(script.contains("BLAST_RADIUS_BASE:-origin/main...HEAD}"));
+    assert_ne!(hook.metadata().unwrap().permissions().mode() & 0o111, 0);
+}
+
+#[test]
+fn init_refuses_to_overwrite_existing_hook_without_force() {
+    let repo = setup_repo();
+    init_git_repo(repo.path());
+    let hook = repo.path().join(".git/hooks/pre-push");
+    fs::write(&hook, "#!/usr/bin/env bash\nexit 0\n").unwrap();
+
+    AssertCommand::cargo_bin("blast-radius")
+        .unwrap()
+        .current_dir(repo.path())
+        .args(["--repo-root", repo.path().to_str().unwrap(), "init"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--force"));
+}
+
+#[test]
+fn init_can_force_blocking_pre_commit_hook() {
+    let repo = setup_repo();
+    init_git_repo(repo.path());
+    let hook = repo.path().join(".git/hooks/pre-commit");
+    fs::write(&hook, "#!/usr/bin/env bash\nexit 0\n").unwrap();
+
+    AssertCommand::cargo_bin("blast-radius")
+        .unwrap()
+        .current_dir(repo.path())
+        .args([
+            "--repo-root",
+            repo.path().to_str().unwrap(),
+            "init",
+            "--hook",
+            "pre-commit",
+            "--blocking",
+            "--fail-threshold",
+            "25",
+            "--force",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("blocking"))
+        .stdout(predicate::str::contains(".git/hooks/pre-commit"));
+
+    let script = fs::read_to_string(&hook).unwrap();
+    assert!(script.contains("git diff --cached --name-only --diff-filter=ACMR"));
+    assert!(
+        script.contains("blast-radius --repo-root . --fail-threshold 25 files \"${files[@]}\"")
+    );
+    assert!(!script.contains("files \"${files[@]}\" || true"));
 }
 
 #[test]

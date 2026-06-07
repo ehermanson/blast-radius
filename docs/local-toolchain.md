@@ -1,8 +1,7 @@
 # Local Toolchain Setup
 
 `blast-radius` is most useful as a local, non-blocking signal. The recommended
-setup is to install it once, then run it from pre-commit or pre-push hooks in
-warning mode.
+setup is to install it once, then let `blast-radius init` create the Git hook.
 
 ## Install
 
@@ -25,74 +24,40 @@ Confirm it is on your `PATH`:
 blast-radius --help
 ```
 
-## Non-Blocking Pre-Commit Hook
+## Recommended Setup
 
-This runs only on staged files and never blocks the commit. It is intended to
-surface surprising blast radius early without interrupting flow.
-
-Create `.git/hooks/pre-commit`:
+Install the default hook:
 
 ```bash
-#!/usr/bin/env bash
-set -u
-
-if ! command -v blast-radius >/dev/null 2>&1; then
-  echo "blast-radius: not installed; skipping"
-  exit 0
-fi
-
-mapfile -t files < <(git diff --cached --name-only --diff-filter=ACMR)
-if [ "${#files[@]}" -eq 0 ]; then
-  exit 0
-fi
-
-echo "blast-radius: checking staged files"
-blast-radius --repo-root . files "${files[@]}" || true
+blast-radius init
 ```
 
-Then make it executable:
+Defaults:
+
+- Installs `.git/hooks/pre-push`
+- Runs `blast-radius --repo-root . diff "$base"`
+- Uses `origin/main...HEAD` as the default diff range
+- Lets you override the range with `BLAST_RADIUS_BASE`
+- Runs in non-blocking mode, so it warns but does not fail the push
+- Refuses to overwrite an existing hook unless `--force` is passed
+
+Useful variants:
 
 ```bash
-chmod +x .git/hooks/pre-commit
+# Check staged files before commit instead of checking the branch diff before push
+blast-radius init --hook pre-commit
+
+# Use a different default comparison range for pre-push
+blast-radius init --base main...HEAD
+
+# Replace an existing hook
+blast-radius init --force
+
+# Make the hook blocking once the team trusts the signal
+blast-radius init --blocking --fail-threshold 25
 ```
 
-## Non-Blocking Pre-Push Hook
-
-This checks the full branch diff before push. It is also non-blocking by
-default.
-
-Create `.git/hooks/pre-push`:
-
-```bash
-#!/usr/bin/env bash
-set -u
-
-if ! command -v blast-radius >/dev/null 2>&1; then
-  echo "blast-radius: not installed; skipping"
-  exit 0
-fi
-
-base="${BLAST_RADIUS_BASE:-origin/main...HEAD}"
-
-echo "blast-radius: checking diff ${base}"
-blast-radius --repo-root . diff "${base}" || true
-```
-
-Then make it executable:
-
-```bash
-chmod +x .git/hooks/pre-push
-```
-
-## Optional Blocking Mode
-
-If a team later wants this to block, remove `|| true` and add a threshold:
-
-```bash
-blast-radius --repo-root . --fail-threshold 25 diff origin/main...HEAD
-```
-
-Exit codes:
+Exit codes in blocking mode:
 
 - `0`: analysis completed and threshold was not exceeded
 - `1`: analysis error
@@ -100,15 +65,26 @@ Exit codes:
 
 ## Hook Managers
 
-For repos that use a hook manager, call the same commands from the manager.
+If a repo already uses a hook manager, either keep using `blast-radius init` for
+plain Git hooks or call the same CLI commands from the manager config.
 
-Husky example:
+`lint-staged` example:
+
+```json
+{
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx,vue,svelte}": "bash -c 'blast-radius --repo-root . files \"$@\" || true' --"
+  }
+}
+```
+
+Husky pre-push example:
 
 ```bash
 npx husky add .husky/pre-push 'blast-radius --repo-root . diff origin/main...HEAD || true'
 ```
 
-Lefthook example:
+Lefthook pre-push example:
 
 ```yaml
 pre-push:
@@ -117,7 +93,7 @@ pre-push:
       run: blast-radius --repo-root . diff origin/main...HEAD || true
 ```
 
-pre-commit framework example:
+`pre-commit` framework example:
 
 ```yaml
 repos:
@@ -132,7 +108,8 @@ repos:
 
 ## Practical Defaults
 
-- Use pre-commit for fast staged-file awareness.
+- Use `blast-radius init` for the lowest-friction local setup.
 - Use pre-push for broader branch-level awareness.
+- Use pre-commit when you want faster staged-file feedback.
 - Keep local hooks non-blocking until the team trusts the signal.
-- Use CI thresholds only after the JSON schema and baseline metrics are stable.
+- Add `--blocking --fail-threshold <count>` only after the signal is stable.
