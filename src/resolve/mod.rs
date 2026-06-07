@@ -24,6 +24,11 @@ mod ruby;
 #[cfg(feature = "ruby")]
 use ruby::is_ruby_file;
 
+#[cfg(feature = "java")]
+mod java;
+#[cfg(feature = "java")]
+use java::is_java_file;
+
 const JAVASCRIPT_RESOLUTION_EXTENSIONS: &[&str] =
     &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"];
 
@@ -212,24 +217,6 @@ impl Resolver {
             .unwrap_or(false)
     }
 
-    #[cfg(feature = "java")]
-    fn resolve_java_import(&self, specifier: &str) -> Option<PathBuf> {
-        if specifier.ends_with(".*") {
-            let package_path = specifier.trim_end_matches(".*").replace('.', "/");
-            return self
-                .java_package_index
-                .get(&PathBuf::from(package_path))
-                .and_then(|files| files.first().cloned());
-        }
-
-        self.suffix_index
-            .get(&PathBuf::from(format!(
-                "{}.java",
-                specifier.replace('.', "/")
-            )))
-            .cloned()
-    }
-
     fn resolve_tsconfig_alias(&self, importer: &Path, specifier: &str) -> Option<PathBuf> {
         let tsconfig = self.nearest_tsconfig(importer)?;
         let tsconfig_dir = tsconfig.path.parent()?;
@@ -392,11 +379,6 @@ fn resolution_extensions() -> &'static [&'static str] {
         }
         extensions
     })
-}
-
-#[cfg(feature = "java")]
-fn is_java_file(path: &Path) -> bool {
-    path.extension().and_then(|ext| ext.to_str()) == Some("java")
 }
 
 #[cfg(any(feature = "ruby", feature = "java"))]
