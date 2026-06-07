@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
@@ -530,27 +531,30 @@ fn is_rust_file(path: &Path) -> bool {
     path.extension().and_then(|ext| ext.to_str()) == Some("rs")
 }
 
-fn resolution_extensions() -> Vec<&'static str> {
-    let mut extensions = JAVASCRIPT_RESOLUTION_EXTENSIONS.to_vec();
-    if cfg!(feature = "python") {
-        extensions.push("py");
-    }
-    if cfg!(feature = "rust") {
-        extensions.push("rs");
-    }
-    if cfg!(feature = "vue") {
-        extensions.push("vue");
-    }
-    if cfg!(feature = "svelte") {
-        extensions.push("svelte");
-    }
-    if cfg!(feature = "ruby") {
-        extensions.push("rb");
-    }
-    if cfg!(feature = "java") {
-        extensions.push("java");
-    }
-    extensions
+fn resolution_extensions() -> &'static [&'static str] {
+    static EXTENSIONS: OnceLock<Vec<&'static str>> = OnceLock::new();
+    EXTENSIONS.get_or_init(|| {
+        let mut extensions = JAVASCRIPT_RESOLUTION_EXTENSIONS.to_vec();
+        if cfg!(feature = "python") {
+            extensions.push("py");
+        }
+        if cfg!(feature = "rust") {
+            extensions.push("rs");
+        }
+        if cfg!(feature = "vue") {
+            extensions.push("vue");
+        }
+        if cfg!(feature = "svelte") {
+            extensions.push("svelte");
+        }
+        if cfg!(feature = "ruby") {
+            extensions.push("rb");
+        }
+        if cfg!(feature = "java") {
+            extensions.push("java");
+        }
+        extensions
+    })
 }
 
 #[cfg(feature = "ruby")]
