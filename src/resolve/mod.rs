@@ -9,6 +9,8 @@ use serde_json::Value;
 
 use crate::fs::{RepoContext, TsConfigPath};
 
+mod javascript;
+
 #[cfg(feature = "python")]
 mod python;
 #[cfg(feature = "python")]
@@ -142,19 +144,7 @@ impl Resolver {
             return Resolution::Unresolved;
         }
 
-        if specifier.starts_with('.') || specifier.starts_with('/') {
-            return self.resolve_path(importer.parent().unwrap_or(&self.repo_root), specifier);
-        }
-
-        if let Some(path) = self.resolve_tsconfig_alias(&importer, specifier) {
-            return Resolution::Resolved(path);
-        }
-
-        if let Some(path) = self.resolve_workspace_package(specifier) {
-            return Resolution::Resolved(path);
-        }
-
-        Resolution::Unresolved
+        self.resolve_javascript_import(&importer, specifier)
     }
 
     fn normalize_importer(&self, importer: &Path) -> PathBuf {
@@ -198,102 +188,10 @@ impl Resolver {
             return self.resolve_java_import(specifier).is_some();
         }
 
-        if specifier.starts_with('.') || specifier.starts_with('/') {
-            return true;
-        }
-
-        if let Some(tsconfig) = self.nearest_tsconfig(importer)
-            && tsconfig
-                .compiler_options
-                .paths
-                .keys()
-                .any(|pattern| match_alias(pattern, specifier).is_some())
-        {
-            return true;
-        }
-
-        package_specifier_parts(specifier)
-            .map(|(package_name, _)| self.package_by_name.contains_key(package_name))
-            .unwrap_or(false)
+        self.is_internal_javascript_specifier(importer, specifier)
     }
 
-    fn resolve_tsconfig_alias(&self, importer: &Path, specifier: &str) -> Option<PathBuf> {
-        let tsconfig = self.nearest_tsconfig(importer)?;
-        let tsconfig_dir = tsconfig.path.parent()?;
-        let base_dir = tsconfig
-            .compiler_options
-            .base_url
-            .as_ref()
-            .map(|base| clean_path(&tsconfig_dir.join(base)))
-            .unwrap_or_else(|| tsconfig_dir.to_path_buf());
-
-        for (pattern, targets) in &tsconfig.compiler_options.paths {
-            let Some(captures) = match_alias(pattern, specifier) else {
-                continue;
-            };
-
-            for target in targets {
-                let candidate = apply_alias_target(target, &captures);
-                if let Resolution::Resolved(resolved) = self.resolve_path(&base_dir, &candidate) {
-                    return Some(resolved);
-                }
-            }
-        }
-
-        None
-    }
-
-    fn nearest_tsconfig(&self, importer: &Path) -> Option<&TsConfigPath> {
-        self.tsconfigs
-            .iter()
-            .filter(|config| importer.starts_with(config.path.parent().unwrap_or(&self.repo_root)))
-            .max_by_key(|config| config.path.components().count())
-    }
-
-    fn resolve_workspace_package(&self, specifier: &str) -> Option<PathBuf> {
-        let (package_name, rest) = package_specifier_parts(specifier)?;
-        let package = self
-            .package_by_name
-            .get(package_name)
-            .and_then(|index| self.packages.get(*index))?;
-
-        if let Some(rest) = rest {
-            let export_key = format!("./{rest}");
-            if let Some(resolved) = resolve_package_export(package, &export_key)
-                .and_then(|path| self.try_resolve_candidate(&path))
-            {
-                return Some(resolved);
-            }
-
-            let direct = package.root.join(rest);
-            if let Some(resolved) = self.try_resolve_candidate(&direct) {
-                return Some(resolved);
-            }
-
-            let src_direct = package.root.join("src").join(rest);
-            if let Some(resolved) = self.try_resolve_candidate(&src_direct) {
-                return Some(resolved);
-            }
-
-            return None;
-        }
-
-        if let Some(resolved) =
-            resolve_package_export(package, ".").and_then(|path| self.try_resolve_candidate(&path))
-        {
-            return Some(resolved);
-        }
-
-        for candidate in &package.entry_candidates {
-            if let Some(resolved) = self.try_resolve_candidate(candidate) {
-                return Some(resolved);
-            }
-        }
-
-        None
-    }
-
-    fn resolve_path(&self, base: &Path, specifier: &str) -> Resolution {
+    pub(super) fn resolve_path(&self, base: &Path, specifier: &str) -> Resolution {
         let path = if specifier.starts_with('/') {
             clean_path(&self.repo_root.join(specifier.trim_start_matches('/')))
         } else {
@@ -305,7 +203,7 @@ impl Resolver {
             .unwrap_or(Resolution::Unresolved)
     }
 
-    fn try_resolve_candidate(&self, candidate: &Path) -> Option<PathBuf> {
+    pub(super) fn try_resolve_candidate(&self, candidate: &Path) -> Option<PathBuf> {
         let candidate = clean_path(candidate);
 
         if self.source_files.contains(&candidate) {
@@ -441,7 +339,7 @@ fn path_suffixes(path: &Path) -> Vec<PathBuf> {
     suffixes
 }
 
-fn package_specifier_parts(specifier: &str) -> Option<(&str, Option<&str>)> {
+pub(super) fn package_specifier_parts(specifier: &str) -> Option<(&str, Option<&str>)> {
     if specifier.is_empty() || specifier.starts_with('.') || specifier.starts_with('/') {
         return None;
     }
@@ -542,7 +440,7 @@ fn export_target(value: &Value) -> Option<String> {
     }
 }
 
-fn resolve_package_export(package: &PackageInfo, export_key: &str) -> Option<PathBuf> {
+pub(super) fn resolve_package_export(package: &PackageInfo, export_key: &str) -> Option<PathBuf> {
     for mapping in &package.export_mappings {
         if let Some(captures) = match_alias(&mapping.key, export_key) {
             let target = apply_alias_target(&mapping.target, &captures);
@@ -552,7 +450,7 @@ fn resolve_package_export(package: &PackageInfo, export_key: &str) -> Option<Pat
     None
 }
 
-fn match_alias(pattern: &str, specifier: &str) -> Option<Vec<String>> {
+pub(super) fn match_alias(pattern: &str, specifier: &str) -> Option<Vec<String>> {
     if let Some((prefix, suffix)) = pattern.split_once('*') {
         if specifier.starts_with(prefix) && specifier.ends_with(suffix) {
             let middle = &specifier[prefix.len()..specifier.len() - suffix.len()];
@@ -568,7 +466,7 @@ fn match_alias(pattern: &str, specifier: &str) -> Option<Vec<String>> {
     }
 }
 
-fn apply_alias_target(target: &str, captures: &[String]) -> String {
+pub(super) fn apply_alias_target(target: &str, captures: &[String]) -> String {
     let mut resolved = target.to_string();
     for capture in captures {
         if let Some(index) = resolved.find('*') {
