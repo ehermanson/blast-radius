@@ -21,8 +21,8 @@
 - Optional Java support behind `--features java`
 - Terminal tree, JSON, Mermaid, and Graphviz DOT output
 - At-a-glance risk verdict (minor / moderate / risky / high) with impacted files listed per package
-- Multi-file `diff` runs (e.g. a pre-commit/pre-push hook over staged files) show a combined verdict plus a per-file breakdown
-- `export`, `file`, and `diff` modes
+- Multi-file runs show a combined verdict plus a per-file breakdown
+- `export`, `file`, and `files` modes
 
 ## Commands
 
@@ -30,51 +30,40 @@
 blast-radius export packages/ui/src/Button.tsx Button
 blast-radius file packages/ui/src/Button.tsx
 blast-radius files packages/ui/src/Button.tsx packages/ui/src/Card.tsx
-blast-radius diff origin/main...HEAD
-blast-radius init
 ```
 
 `files` takes a list of paths and reports each file's blast radius plus a combined
-total — handy in a pre-commit hook, where lint-staged passes staged files as args.
+total. It is designed for tools like `lint-staged`, Husky, Lefthook, and the
+`pre-commit` framework to pass changed filenames in explicitly.
 
 ## Local Pipeline Usage
 
-The simple setup is:
+Install the binary:
 
 ```bash
 cargo install --path .
-blast-radius init
 ```
-
-That installs a non-blocking `pre-push` hook at `.git/hooks/pre-push`. It warns
-about broad changes before push, but it does not block your workflow.
 
 Install with optional frontend component support first if the repo uses Vue or
 Svelte:
 
 ```bash
 cargo install --path . --features vue,svelte
-blast-radius init
 ```
 
-Common setup options:
+Then call `blast-radius files` from your existing hook manager. For example,
+with `lint-staged`:
 
-```bash
-# Check staged files before commit instead of branch diff before push
-blast-radius init --hook pre-commit
-
-# Use a different comparison range for pre-push
-blast-radius init --base main...HEAD
-
-# Make the hook blocking once the team trusts the signal
-blast-radius init --blocking --fail-threshold 25
-
-# Replace an existing blast-radius hook
-blast-radius init --force
+```json
+{
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx,vue,svelte}": "bash -c 'blast-radius --repo-root . files \"$@\" || true' --"
+  }
+}
 ```
 
 See `docs/local-toolchain.md` for hook-manager examples with `lint-staged`,
-Husky, Lefthook, and the `pre-commit` framework.
+Lefthook, and the `pre-commit` framework.
 
 ## Language Support
 
@@ -219,7 +208,7 @@ make quality-java
 See `docs/quality.md` for what each command validates.
 
 See `docs/local-toolchain.md` for install instructions and non-blocking
-pre-commit/pre-push hook examples.
+hook-manager examples.
 
 See `docs/language-support.md` for the multi-language architecture and next
 language-adapter work.

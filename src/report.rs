@@ -45,13 +45,10 @@ fn render_tree(result: &AnalysisResult, verbose: bool) -> String {
     // ── Target ─────────────────────────────────────────────
     let multi = result.roots.len() > 1;
     if multi {
-        let mut header = format!(
+        let header = format!(
             "  {}",
-            theme.subject(&format!("{} changed files", result.roots.len()))
+            theme.subject(&format!("{} input files", result.roots.len()))
         );
-        if let AnalysisTarget::Diff { git_range, .. } = &result.target {
-            header.push_str(&format!("  {}", theme.muted(&format!("· {git_range}"))));
-        }
         lines.push(header);
     } else {
         lines.push(format!(
@@ -71,7 +68,7 @@ fn render_tree(result: &AnalysisResult, verbose: bool) -> String {
         ));
     } else {
         let aggregate = if multi {
-            format!("  (across all {} changes)", result.roots.len())
+            format!("  (across all {} inputs)", result.roots.len())
         } else {
             String::new()
         };
@@ -102,9 +99,9 @@ fn render_tree(result: &AnalysisResult, verbose: bool) -> String {
     }
 
     if multi {
-        // Attribute impacted files to the change that caused them.
+        // Attribute impacted files to the input that caused them.
         lines.push(String::new());
-        lines.push(theme.rule(&format!("impact by changed file · {}", result.roots.len())));
+        lines.push(theme.rule(&format!("impact by input file · {}", result.roots.len())));
         for (index, root) in result.roots.iter().enumerate() {
             if index > 0 {
                 lines.push(String::new());
@@ -159,11 +156,10 @@ fn render_cascade(result: &AnalysisResult, theme: &Theme, lines: &mut Vec<String
     lines.push(String::new());
     lines.push(theme.rule("cascade · overview"));
     lines.push(format!(
-        "{} {} files  {} exports  {} diff roots",
+        "{} {} files  {} exports",
         theme.key("nodes"),
         theme.number(kind_counts.files),
-        theme.number(kind_counts.exports),
-        theme.number(kind_counts.diff_roots)
+        theme.number(kind_counts.exports)
     ));
 
     if result.nodes.is_empty() {
@@ -325,7 +321,6 @@ fn relative_target(result: &AnalysisResult) -> String {
         AnalysisTarget::Export { file, .. } => Some(file),
         AnalysisTarget::File { file } => Some(file),
         AnalysisTarget::Files { files } => files.first(),
-        AnalysisTarget::Diff { git_range, .. } => return git_range.clone(),
     };
     file.map(|file| {
         file.strip_prefix(&result.repo_root)
@@ -352,11 +347,6 @@ fn format_subject(target: &AnalysisTarget) -> String {
                 .to_string(),
             _ => format!("{} files", files.len()),
         },
-        AnalysisTarget::Diff { changed_files, .. } => format!(
-            "{} changed file{}",
-            changed_files.len(),
-            plural(changed_files.len())
-        ),
     }
 }
 
@@ -367,7 +357,7 @@ struct ImpactedFile {
     endpoint: bool,
 }
 
-/// One changed file's block: a header (severity + the file + its reach) followed
+/// One input file's block: a header (severity + the file + its reach) followed
 /// by the files it impacts, grouped by package.
 fn render_root_block(
     root: &RootImpact,
@@ -611,14 +601,6 @@ fn preferred_root(result: &AnalysisResult) -> Option<String> {
             let preferred_refs: Vec<&str> = preferred.iter().map(String::as_str).collect();
             find_existing_node(result, &preferred_refs)
         }
-        AnalysisTarget::Diff { changed_files, .. } => {
-            let preferred: Vec<String> = changed_files
-                .iter()
-                .map(|file| format!("diff:{}", file.display()))
-                .collect();
-            let preferred_refs: Vec<&str> = preferred.iter().map(String::as_str).collect();
-            find_existing_node(result, &preferred_refs)
-        }
     }
 }
 
@@ -710,7 +692,7 @@ fn is_transparent_node(node: &GraphNode, root_node: &GraphNode, result: &Analysi
     match node.kind {
         NodeKind::Export => true,
         NodeKind::File => is_barrel_passthrough(node, result),
-        NodeKind::Diff | NodeKind::Usage => false,
+        NodeKind::Usage => false,
     }
 }
 
@@ -845,7 +827,6 @@ fn edge_label(kind: EdgeKind, is_ambiguous: bool, theme: &Theme) -> String {
         EdgeKind::UsesJsxComponent => "component use",
         EdgeKind::RequiresModule => "require",
         EdgeKind::CommonJsExport => "re-exported local",
-        EdgeKind::ContainsChange => "changed",
     };
 
     if is_ambiguous {
@@ -857,18 +838,12 @@ fn edge_label(kind: EdgeKind, is_ambiguous: bool, theme: &Theme) -> String {
 
 fn format_node(node: &GraphNode, theme: &Theme) -> String {
     let icon = match node.kind {
-        NodeKind::Diff => "Δ",
         NodeKind::File => "ƒ",
         NodeKind::Export => "⇢",
         NodeKind::Usage => "•",
     };
 
     match node.kind {
-        NodeKind::Diff => format!(
-            "{} {}",
-            theme.diff(icon),
-            theme.diff_path(trim_changed_prefix(&node.label))
-        ),
         NodeKind::File => {
             let depth = if node.depth == 0 {
                 theme.depth_root("root")
@@ -898,16 +873,11 @@ fn split_export_label(label: &str) -> (&str, Option<&str>) {
     }
 }
 
-fn trim_changed_prefix(label: &str) -> &str {
-    label.strip_prefix("changed ").unwrap_or(label)
-}
-
 fn format_mode(mode: &AnalysisMode) -> &'static str {
     match mode {
         AnalysisMode::Export => "export",
         AnalysisMode::File => "file",
         AnalysisMode::Files => "files",
-        AnalysisMode::Diff => "diff",
     }
 }
 
@@ -926,7 +896,6 @@ fn escape_quotes(value: &str) -> String {
 struct NodeCounts {
     files: usize,
     exports: usize,
-    diff_roots: usize,
 }
 
 fn count_node_kinds(result: &AnalysisResult) -> NodeCounts {
@@ -935,7 +904,6 @@ fn count_node_kinds(result: &AnalysisResult) -> NodeCounts {
         match node.kind {
             NodeKind::File => counts.files += 1,
             NodeKind::Export => counts.exports += 1,
-            NodeKind::Diff => counts.diff_roots += 1,
             NodeKind::Usage => {}
         }
     }
@@ -1088,10 +1056,6 @@ impl Theme {
         self.paint(text, "36")
     }
 
-    fn diff_path(&self, text: &str) -> String {
-        self.paint(text, "35")
-    }
-
     fn symbol(&self, text: &str) -> String {
         self.paint(format!("#{text}"), "1;33")
     }
@@ -1106,10 +1070,6 @@ impl Theme {
 
     fn export(&self, text: &str) -> String {
         self.paint(text, "33")
-    }
-
-    fn diff(&self, text: &str) -> String {
-        self.paint(text, "35")
     }
 
     fn depth(&self, value: usize) -> String {

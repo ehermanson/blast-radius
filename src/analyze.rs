@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
-use std::process::Command as ProcessCommand;
 
 use anyhow::{Context, Result, bail};
 
@@ -66,7 +65,6 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
     let parse_failures = parse_warnings.len();
 
     match &cli.command {
-        Command::Init { .. } => bail!("init does not run analysis"),
         Command::Export { file, export_name } => {
             let file = normalize_input_path(&context.repo_root, file)?;
             if !modules.contains_key(&file) {
@@ -155,42 +153,6 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
             analyze_from_roots(
                 AnalysisMode::Files,
                 AnalysisTarget::Files { files: normalized },
-                context,
-                &modules,
-                &module_states,
-                &reverse,
-                parse_warnings,
-                parse_failures,
-                unresolved_imports,
-                roots,
-            )
-        }
-        Command::Diff { git_range } => {
-            let changed_files = changed_files(&context.repo_root, git_range)?;
-            let mut roots = Vec::new();
-            for file in &changed_files {
-                let Some(module) = modules.get(file) else {
-                    continue;
-                };
-                let exports = module_states
-                    .get(file)
-                    .map(|state| {
-                        if state.public_exports.is_empty() {
-                            BTreeSet::from([String::from("*file*")])
-                        } else {
-                            state.public_exports.clone()
-                        }
-                    })
-                    .unwrap_or_else(|| BTreeSet::from([String::from("*file*")]));
-                roots.push((module.file.clone(), exports, true));
-            }
-
-            analyze_from_roots(
-                AnalysisMode::Diff,
-                AnalysisTarget::Diff {
-                    git_range: git_range.clone(),
-                    changed_files,
-                },
                 context,
                 &modules,
                 &module_states,
@@ -380,14 +342,13 @@ fn analyze_from_roots(
     }
     let workspaces = collect_workspaces(context);
 
-    let (states, reasons) = run_bfs(&roots, &mode, modules, module_states, reverse);
+    let (states, reasons) = run_bfs(&roots, modules, module_states, reverse);
 
     // For a multi-file run, also compute each file's blast radius on its own so
     // the report can break impact down per file.
     let root_impacts = if roots.len() > 1 {
         compute_root_impacts(
             &roots,
-            &mode,
             modules,
             module_states,
             reverse,
@@ -420,7 +381,6 @@ fn analyze_from_roots(
 /// files (with depth) and the edges that explain each impact.
 fn run_bfs(
     roots: &[(PathBuf, BTreeSet<String>, bool)],
-    mode: &AnalysisMode,
     modules: &BTreeMap<PathBuf, ModuleFacts>,
     module_states: &BTreeMap<PathBuf, ModuleState>,
     reverse: &BTreeMap<PathBuf, Vec<ConsumerLink>>,
@@ -440,15 +400,6 @@ fn run_bfs(
         entry.affects_runtime |= *affects_runtime;
         entry.file_affected = true;
         queue.push_back(file.clone());
-
-        if matches!(mode, AnalysisMode::Diff) {
-            reasons.push(ImpactReason {
-                parent_id: format!("diff:{}", file.display()),
-                child_id: file_id(file),
-                kind: EdgeKind::ContainsChange,
-                is_ambiguous: false,
-            });
-        }
     }
 
     while let Some(current_file) = queue.pop_front() {
@@ -588,11 +539,10 @@ fn run_bfs(
     (states, reasons)
 }
 
-/// Compute each changed file's individual blast radius by running the walk from
+/// Compute each input file's individual blast radius by running the walk from
 /// that single file. Sorted by reach, widest first.
 fn compute_root_impacts(
     roots: &[(PathBuf, BTreeSet<String>, bool)],
-    mode: &AnalysisMode,
     modules: &BTreeMap<PathBuf, ModuleFacts>,
     module_states: &BTreeMap<PathBuf, ModuleState>,
     reverse: &BTreeMap<PathBuf, Vec<ConsumerLink>>,
@@ -602,13 +552,8 @@ fn compute_root_impacts(
     let mut impacts: Vec<RootImpact> = roots
         .iter()
         .map(|root| {
-            let (states, _) = run_bfs(
-                std::slice::from_ref(root),
-                mode,
-                modules,
-                module_states,
-                reverse,
-            );
+            let (states, _) =
+                run_bfs(std::slice::from_ref(root), modules, module_states, reverse);
 
             let mut direct = 0;
             let mut indirect = 0;
@@ -678,22 +623,6 @@ fn build_result(
     let mut edges = Vec::new();
     let mut seen_nodes = BTreeSet::new();
     let mut seen_edges = BTreeSet::new();
-
-    if let AnalysisTarget::Diff { changed_files, .. } = &target {
-        for file in changed_files {
-            let id = format!("diff:{}", file.display());
-            if seen_nodes.insert(id.clone()) {
-                nodes.push(GraphNode {
-                    id: id.clone(),
-                    label: format!("changed {}", relative_label(&context.repo_root, file)),
-                    file: file.clone(),
-                    symbol: None,
-                    kind: NodeKind::Diff,
-                    depth: 0,
-                });
-            }
-        }
-    }
 
     for (file, state) in &states {
         let file_id = file_id(file);
@@ -896,33 +825,6 @@ fn normalize_input_path(repo_root: &Path, path: &Path) -> Result<PathBuf> {
     Ok(joined
         .canonicalize()
         .with_context(|| format!("failed to resolve input path {}", joined.display()))?)
-}
-
-fn changed_files(repo_root: &Path, git_range: &str) -> Result<Vec<PathBuf>> {
-    let output = ProcessCommand::new("git")
-        .arg("-C")
-        .arg(repo_root)
-        .arg("diff")
-        .arg("--name-only")
-        .arg(git_range)
-        .output()
-        .with_context(|| format!("failed to run git diff for range {git_range}"))?;
-
-    if !output.status.success() {
-        bail!(
-            "git diff failed for range {}: {}",
-            git_range,
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    let files = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(|line| repo_root.join(line))
-        .filter_map(|path| path.canonicalize().ok())
-        .collect();
-
-    Ok(files)
 }
 
 fn count_unresolved_imports(

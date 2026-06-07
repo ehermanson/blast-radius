@@ -11,7 +11,7 @@ pub struct AnalysisResult {
     pub source_file_count: usize,
     pub summary: Summary,
     pub workspaces: Vec<Workspace>,
-    /// Per-changed-file impact, populated only for multi-file `diff` runs.
+    /// Per-input-file impact, populated only for multi-file runs.
     pub roots: Vec<RootImpact>,
     pub nodes: Vec<GraphNode>,
     pub edges: Vec<GraphEdge>,
@@ -27,9 +27,8 @@ pub struct Workspace {
     pub root: String,
 }
 
-/// The blast radius of a single changed file, so a multi-file run (e.g. a
-/// pre-commit hook over staged files) can show each file's impact individually
-/// alongside the combined total.
+/// The blast radius of a single input file, so a multi-file run can show each
+/// file's impact individually alongside the combined total.
 #[derive(Debug, Clone, Serialize)]
 pub struct RootImpact {
     pub file: String,
@@ -41,7 +40,7 @@ pub struct RootImpact {
     pub files: Vec<RootImpactFile>,
 }
 
-/// A single file impacted by a particular changed file.
+/// A single file impacted by a particular input file.
 #[derive(Debug, Clone, Serialize)]
 pub struct RootImpactFile {
     pub path: String,
@@ -76,7 +75,6 @@ pub enum AnalysisMode {
     Export,
     File,
     Files,
-    Diff,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -91,10 +89,6 @@ pub enum AnalysisTarget {
     },
     Files {
         files: Vec<PathBuf>,
-    },
-    Diff {
-        git_range: String,
-        changed_files: Vec<PathBuf>,
     },
 }
 
@@ -124,7 +118,6 @@ pub enum NodeKind {
     File,
     Export,
     Usage,
-    Diff,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -147,7 +140,6 @@ pub enum EdgeKind {
     UsesJsxComponent,
     RequiresModule,
     CommonJsExport,
-    ContainsChange,
 }
 
 #[derive(Debug, Clone)]

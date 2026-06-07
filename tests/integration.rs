@@ -1,7 +1,5 @@
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use assert_cmd::Command as AssertCommand;
 use predicates::prelude::*;
@@ -67,14 +65,6 @@ fn setup_repo() -> tempfile::TempDir {
     dir
 }
 
-fn init_git_repo(path: &Path) {
-    Command::new("git")
-        .arg("init")
-        .current_dir(path)
-        .output()
-        .unwrap();
-}
-
 #[test]
 fn export_mode_reports_transitive_blast_radius() {
     let repo = setup_repo();
@@ -137,77 +127,6 @@ fn export_mode_reports_transitive_blast_radius() {
     );
 
     assert_eq!(json["summary"]["unresolved_imports"].as_u64().unwrap(), 0);
-}
-
-#[test]
-fn init_installs_non_blocking_pre_push_hook_by_default() {
-    let repo = setup_repo();
-    init_git_repo(repo.path());
-
-    AssertCommand::cargo_bin("blast-radius")
-        .unwrap()
-        .current_dir(repo.path())
-        .args(["--repo-root", repo.path().to_str().unwrap(), "init"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("non-blocking"))
-        .stdout(predicate::str::contains(".git/hooks/pre-push"));
-
-    let hook = repo.path().join(".git/hooks/pre-push");
-    let script = fs::read_to_string(&hook).unwrap();
-    assert!(script.contains("blast-radius --repo-root . diff \"$base\" || true"));
-    assert!(script.contains("BLAST_RADIUS_BASE:-origin/main...HEAD}"));
-    assert_ne!(hook.metadata().unwrap().permissions().mode() & 0o111, 0);
-}
-
-#[test]
-fn init_refuses_to_overwrite_existing_hook_without_force() {
-    let repo = setup_repo();
-    init_git_repo(repo.path());
-    let hook = repo.path().join(".git/hooks/pre-push");
-    fs::write(&hook, "#!/usr/bin/env bash\nexit 0\n").unwrap();
-
-    AssertCommand::cargo_bin("blast-radius")
-        .unwrap()
-        .current_dir(repo.path())
-        .args(["--repo-root", repo.path().to_str().unwrap(), "init"])
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("--force"));
-}
-
-#[test]
-fn init_can_force_blocking_pre_commit_hook() {
-    let repo = setup_repo();
-    init_git_repo(repo.path());
-    let hook = repo.path().join(".git/hooks/pre-commit");
-    fs::write(&hook, "#!/usr/bin/env bash\nexit 0\n").unwrap();
-
-    AssertCommand::cargo_bin("blast-radius")
-        .unwrap()
-        .current_dir(repo.path())
-        .args([
-            "--repo-root",
-            repo.path().to_str().unwrap(),
-            "init",
-            "--hook",
-            "pre-commit",
-            "--blocking",
-            "--fail-threshold",
-            "25",
-            "--force",
-        ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("blocking"))
-        .stdout(predicate::str::contains(".git/hooks/pre-commit"));
-
-    let script = fs::read_to_string(&hook).unwrap();
-    assert!(script.contains("git diff --cached --name-only --diff-filter=ACMR"));
-    assert!(
-        script.contains("blast-radius --repo-root . --fail-threshold 25 files \"${files[@]}\"")
-    );
-    assert!(!script.contains("files \"${files[@]}\" || true"));
 }
 
 #[test]
@@ -288,92 +207,10 @@ fn graph_formats_render() {
 }
 
 #[test]
-fn diff_mode_uses_git_range() {
+fn files_mode_breaks_down_each_changed_file() {
     let repo = setup_repo();
 
-    Command::new("git")
-        .arg("init")
-        .current_dir(repo.path())
-        .output()
-        .unwrap();
-    Command::new("git")
-        .args(["config", "user.email", "test@example.com"])
-        .current_dir(repo.path())
-        .output()
-        .unwrap();
-    Command::new("git")
-        .args(["config", "user.name", "Test User"])
-        .current_dir(repo.path())
-        .output()
-        .unwrap();
-    Command::new("git")
-        .args(["add", "."])
-        .current_dir(repo.path())
-        .output()
-        .unwrap();
-    Command::new("git")
-        .args(["commit", "-m", "initial"])
-        .current_dir(repo.path())
-        .output()
-        .unwrap();
-
-    fs::write(
-        repo.path().join("packages/ui/src/Button.tsx"),
-        "export const Button = () => <button>changed</button>;\nexport default Button;\n",
-    )
-    .unwrap();
-
-    let output = AssertCommand::cargo_bin("blast-radius")
-        .unwrap()
-        .current_dir(repo.path())
-        .args([
-            "--repo-root",
-            repo.path().to_str().unwrap(),
-            "--format",
-            "json",
-            "diff",
-            "HEAD",
-        ])
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let json: Value = serde_json::from_slice(&output).unwrap();
-    let changed_files = json["target"]["changed_files"].as_array().unwrap();
-    assert_eq!(changed_files.len(), 1);
-    let labels: Vec<String> = json["nodes"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter_map(|node| node["label"].as_str().map(ToOwned::to_owned))
-        .collect();
-    assert!(
-        labels
-            .iter()
-            .any(|label| label.contains("changed packages/ui/src/Button.tsx"))
-    );
-}
-
-#[test]
-fn diff_mode_breaks_down_each_changed_file() {
-    let repo = setup_repo();
-    for args in [
-        vec!["init"],
-        vec!["config", "user.email", "test@example.com"],
-        vec!["config", "user.name", "Test User"],
-        vec!["add", "."],
-        vec!["commit", "-m", "initial"],
-    ] {
-        Command::new("git")
-            .args(&args)
-            .current_dir(repo.path())
-            .output()
-            .unwrap();
-    }
-
-    // Change two files, each with its own downstream blast radius.
+    // Analyze two explicit files, each with its own downstream blast radius.
     fs::write(
         repo.path().join("packages/ui/src/Button.tsx"),
         "export const Button = () => <button>changed</button>;\nexport default Button;\n",
@@ -394,8 +231,9 @@ fn diff_mode_breaks_down_each_changed_file() {
             repo.path().to_str().unwrap(),
             "--format",
             "json",
-            "diff",
-            "HEAD",
+            "files",
+            "packages/ui/src/Button.tsx",
+            "packages/ui/src/Card.tsx",
         ])
         .assert()
         .success()
@@ -412,11 +250,17 @@ fn diff_mode_breaks_down_each_changed_file() {
     AssertCommand::cargo_bin("blast-radius")
         .unwrap()
         .current_dir(repo.path())
-        .args(["--repo-root", repo.path().to_str().unwrap(), "diff", "HEAD"])
+        .args([
+            "--repo-root",
+            repo.path().to_str().unwrap(),
+            "files",
+            "packages/ui/src/Button.tsx",
+            "packages/ui/src/Card.tsx",
+        ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("IMPACT BY CHANGED FILE"))
-        .stdout(predicate::str::contains("changed files"))
+        .stdout(predicate::str::contains("IMPACT BY INPUT FILE"))
+        .stdout(predicate::str::contains("input files"))
         .stdout(predicate::str::contains("impacted file"));
 }
 

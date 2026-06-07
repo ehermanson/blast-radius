@@ -1,7 +1,7 @@
 # Local Toolchain Setup
 
-`blast-radius` is most useful as a local, non-blocking signal. The recommended
-setup is to install it once, then let `blast-radius init` create the Git hook.
+`blast-radius` expects callers to pass the files they want analyzed. It does not
+discover changed files itself or install hooks.
 
 ## Install
 
@@ -24,38 +24,16 @@ Confirm it is on your `PATH`:
 blast-radius --help
 ```
 
-## Recommended Setup
+## File List Input
 
-Install the default hook:
-
-```bash
-blast-radius init
-```
-
-Defaults:
-
-- Installs `.git/hooks/pre-push`
-- Runs `blast-radius --repo-root . diff "$base"`
-- Uses `origin/main...HEAD` as the default diff range
-- Lets you override the range with `BLAST_RADIUS_BASE`
-- Runs in non-blocking mode, so it warns but does not fail the push
-- Refuses to overwrite an existing hook unless `--force` is passed
-
-Useful variants:
+Use `files` when a hook manager or CI step already has a list of changed files:
 
 ```bash
-# Check staged files before commit instead of checking the branch diff before push
-blast-radius init --hook pre-commit
-
-# Use a different default comparison range for pre-push
-blast-radius init --base main...HEAD
-
-# Replace an existing hook
-blast-radius init --force
-
-# Make the hook blocking once the team trusts the signal
-blast-radius init --blocking --fail-threshold 25
+blast-radius --repo-root . files packages/ui/src/Button.tsx packages/ui/src/Card.tsx
 ```
+
+In non-blocking local workflows, append `|| true` so the signal does not stop
+the developer until the team trusts the output.
 
 Exit codes in blocking mode:
 
@@ -64,9 +42,6 @@ Exit codes in blocking mode:
 - `2`: `--fail-threshold` was exceeded
 
 ## Hook Managers
-
-If a repo already uses a hook manager, either keep using `blast-radius init` for
-plain Git hooks or call the same CLI commands from the manager config.
 
 `lint-staged` example:
 
@@ -78,19 +53,14 @@ plain Git hooks or call the same CLI commands from the manager config.
 }
 ```
 
-Husky pre-push example:
-
-```bash
-npx husky add .husky/pre-push 'blast-radius --repo-root . diff origin/main...HEAD || true'
-```
-
-Lefthook pre-push example:
+Lefthook example:
 
 ```yaml
-pre-push:
+pre-commit:
   commands:
     blast-radius:
-      run: blast-radius --repo-root . diff origin/main...HEAD || true
+      glob: "*.{js,jsx,ts,tsx,vue,svelte}"
+      run: blast-radius --repo-root . files {staged_files} || true
 ```
 
 `pre-commit` framework example:
@@ -108,8 +78,6 @@ repos:
 
 ## Practical Defaults
 
-- Use `blast-radius init` for the lowest-friction local setup.
-- Use pre-push for broader branch-level awareness.
-- Use pre-commit when you want faster staged-file feedback.
-- Keep local hooks non-blocking until the team trusts the signal.
-- Add `--blocking --fail-threshold <count>` only after the signal is stable.
+- Prefer `files` in local hooks and CI because it is deterministic.
+- Keep local checks non-blocking until the team trusts the signal.
+- Add `--fail-threshold <count>` only after the signal is stable.
