@@ -77,9 +77,7 @@ impl Resolver {
     }
 
     pub fn resolve(&self, importer: &Path, specifier: &str) -> Resolution {
-        let importer = importer
-            .canonicalize()
-            .unwrap_or_else(|_| clean_path(importer));
+        let importer = clean_path(importer);
 
         #[cfg(feature = "python")]
         if is_python_file(&importer) {
