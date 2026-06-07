@@ -19,6 +19,11 @@ mod rust_lang;
 #[cfg(feature = "rust")]
 use rust_lang::is_rust_file;
 
+#[cfg(feature = "ruby")]
+mod ruby;
+#[cfg(feature = "ruby")]
+use ruby::is_ruby_file;
+
 const JAVASCRIPT_RESOLUTION_EXTENSIONS: &[&str] =
     &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"];
 
@@ -207,28 +212,6 @@ impl Resolver {
             .unwrap_or(false)
     }
 
-    #[cfg(feature = "ruby")]
-    fn resolve_ruby_import(&self, importer: &Path, specifier: &str) -> Option<PathBuf> {
-        if specifier.starts_with('.') {
-            let base = importer.parent().unwrap_or(&self.repo_root);
-            return self.try_resolve_candidate(&base.join(specifier));
-        }
-
-        for candidate in [
-            self.repo_root.join(specifier),
-            self.repo_root.join("lib").join(specifier),
-            self.repo_root.join("app").join(specifier),
-        ] {
-            if let Some(path) = self.try_resolve_candidate(&candidate) {
-                return Some(path);
-            }
-        }
-
-        self.suffix_index
-            .get(&PathBuf::from(format!("{specifier}.rb")))
-            .cloned()
-    }
-
     #[cfg(feature = "java")]
     fn resolve_java_import(&self, specifier: &str) -> Option<PathBuf> {
         if specifier.ends_with(".*") {
@@ -409,11 +392,6 @@ fn resolution_extensions() -> &'static [&'static str] {
         }
         extensions
     })
-}
-
-#[cfg(feature = "ruby")]
-fn is_ruby_file(path: &Path) -> bool {
-    path.extension().and_then(|ext| ext.to_str()) == Some("rb")
 }
 
 #[cfg(feature = "java")]
