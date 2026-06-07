@@ -1,9 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::IsTerminal;
 use std::path::Path;
 
 use anyhow::Result;
-use figlet_rs::FIGlet;
 
 use crate::cli::OutputFormat;
 use crate::graph::{
@@ -13,6 +11,9 @@ use crate::graph::{
 
 mod graph_formats;
 use graph_formats::{render_dot, render_mermaid};
+
+mod theme;
+use theme::{RiskTier, Theme};
 
 pub fn render(format: &OutputFormat, result: &AnalysisResult, verbose: bool) -> Result<String> {
     let rendered = match format {
@@ -24,8 +25,6 @@ pub fn render(format: &OutputFormat, result: &AnalysisResult, verbose: bool) -> 
 
     Ok(rendered)
 }
-
-const LAYOUT_WIDTH: usize = 60;
 
 fn render_tree(result: &AnalysisResult, verbose: bool) -> String {
     let theme = Theme::detect();
@@ -225,24 +224,6 @@ fn render_cascade(result: &AnalysisResult, theme: &Theme, lines: &mut Vec<String
                 );
             }
         }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RiskTier {
-    Minor,
-    Moderate,
-    Risky,
-    High,
-}
-
-/// `(label, foreground code, pill code)` for a tier — a green→red gradient.
-fn tier_palette(tier: RiskTier) -> (&'static str, &'static str, &'static str) {
-    match tier {
-        RiskTier::Minor => ("MINOR", "38;5;42", "1;30;48;5;42"),
-        RiskTier::Moderate => ("MODERATE", "38;5;220", "1;30;48;5;220"),
-        RiskTier::Risky => ("RISKY", "38;5;208", "1;30;48;5;208"),
-        RiskTier::High => ("HIGH", "38;5;196", "1;97;48;5;196"),
     }
 }
 
@@ -837,201 +818,6 @@ fn count_node_kinds(result: &AnalysisResult) -> NodeCounts {
         }
     }
     counts
-}
-
-struct Theme {
-    color: bool,
-}
-
-impl Theme {
-    fn detect() -> Self {
-        let color = std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
-        Self { color }
-    }
-
-    fn paint(&self, text: impl AsRef<str>, code: &str) -> String {
-        let text = text.as_ref();
-        if self.color {
-            format!("\x1b[{code}m{text}\x1b[0m")
-        } else {
-            text.to_string()
-        }
-    }
-
-    fn key(&self, text: &str) -> String {
-        self.paint(format!("{text:>12}"), "2;37")
-    }
-
-    /// Big ASCII wordmark on a single row, rendered from a FIGlet font and
-    /// tinted with a warm vertical "blast" gradient, led by a starburst accent.
-    fn banner(&self) -> Vec<String> {
-        // The `slant` font gives the wordmark some forward motion. Trimming the
-        // font's trailing padding keeps the burst + wordmark to ~77 cols.
-        let wordmark = FIGlet::slant()
-            .ok()
-            .and_then(|font| font.convert("BLAST RADIUS").map(|fig| fig.to_string()));
-
-        let Some(wordmark) = wordmark else {
-            // Fallback if the font can't be loaded for any reason.
-            let burst = self.paint("-=*=-", "1;38;5;226");
-            let blast = self.paint("BLAST", "1;38;5;214");
-            let radius = self.paint("RADIUS", "1;38;5;202");
-            return vec![format!("  {burst}  {blast} {radius}")];
-        };
-
-        // Drop trailing per-line padding and the blank row the font appends.
-        let mut rows: Vec<&str> = wordmark.lines().map(str::trim_end).collect();
-        while rows.last().is_some_and(|l| l.is_empty()) {
-            rows.pop();
-        }
-        let height = rows.len().max(1);
-
-        // Warm vertical gradient (256-color), brightest at the top.
-        const GRADIENT: [&str; 6] = [
-            "38;5;226", "38;5;220", "38;5;214", "38;5;208", "38;5;202", "38;5;196",
-        ];
-
-        // A full starburst accent for "blast", vertically centered on the word.
-        const BURST: [&str; 5] = [r"\ ' /", r".\|/.", "-=*=-", r"'/|\'", r"/ . \"];
-        let burst_w = BURST.iter().map(|l| l.chars().count()).max().unwrap_or(0);
-        let pad_top = height.saturating_sub(BURST.len()) / 2;
-
-        let mut out = Vec::new();
-        for (i, row) in rows.iter().enumerate() {
-            let burst_line = i
-                .checked_sub(pad_top)
-                .and_then(|j| BURST.get(j))
-                .copied()
-                .unwrap_or("");
-            let burst = self.paint(format!("{burst_line:^burst_w$}"), "1;38;5;226");
-            let code = GRADIENT[(i * GRADIENT.len()) / height];
-            let word = self.paint(row, &format!("1;{code}"));
-            out.push(format!(" {burst} {word}"));
-        }
-        out
-    }
-
-    fn subject(&self, text: &str) -> String {
-        self.paint(text, "1;37")
-    }
-
-    fn endpoint(&self, text: &str) -> String {
-        self.paint(text, "38;5;42")
-    }
-
-    fn ok(&self, text: &str) -> String {
-        self.paint(text, "1;32")
-    }
-
-    /// A small severity dot, e.g. for the per-changed-file list.
-    fn tier_dot(&self, tier: RiskTier) -> String {
-        let (_, fg, _) = tier_palette(tier);
-        let glyph = match tier {
-            RiskTier::Minor => "○",
-            RiskTier::Moderate => "◐",
-            RiskTier::Risky => "◕",
-            RiskTier::High => "●",
-        };
-        self.paint(glyph, fg)
-    }
-
-    /// A solid-color risk chip, e.g. ` MODERATE `.
-    fn risk_pill(&self, tier: RiskTier) -> String {
-        let (label, _, code) = tier_palette(tier);
-        self.paint(format!(" {label} "), code)
-    }
-
-    /// A 20-cell bar filled in proportion to the tier, tinted by severity.
-    fn meter(&self, tier: RiskTier) -> String {
-        const CELLS: usize = 20;
-        let (_, fg, _) = tier_palette(tier);
-        let filled = match tier {
-            RiskTier::Minor => 5,
-            RiskTier::Moderate => 10,
-            RiskTier::Risky => 15,
-            RiskTier::High => CELLS,
-        };
-        format!(
-            "{}{}",
-            self.paint("█".repeat(filled), fg),
-            self.paint("░".repeat(CELLS - filled), "2;37")
-        )
-    }
-
-    /// A full-width section divider: `── LABEL ───────────────`.
-    fn rule(&self, label: &str) -> String {
-        let label = label.to_uppercase();
-        let lead = "──";
-        // 2 leading + spaces around label, padded out to the layout width.
-        let used = 2 + lead.chars().count() + 1 + label.chars().count() + 1;
-        let trail = LAYOUT_WIDTH.saturating_sub(used);
-        format!(
-            "  {} {} {}",
-            self.paint(lead, "2;37"),
-            self.paint(&label, "1;37"),
-            self.paint("─".repeat(trail), "2;37")
-        )
-    }
-
-    fn pkg(&self, text: &str) -> String {
-        self.paint(text, "1;36")
-    }
-
-    fn count(&self, text: &str) -> String {
-        self.paint(text, "1;32")
-    }
-
-    fn path(&self, text: &str) -> String {
-        self.paint(text, "36")
-    }
-
-    fn symbol(&self, text: &str) -> String {
-        self.paint(format!("#{text}"), "1;33")
-    }
-
-    fn number(&self, value: usize) -> String {
-        self.paint(value.to_string(), "1;32")
-    }
-
-    fn file(&self, text: &str) -> String {
-        self.paint(text, "34")
-    }
-
-    fn export(&self, text: &str) -> String {
-        self.paint(text, "33")
-    }
-
-    fn depth(&self, value: usize) -> String {
-        self.paint(format!("d{value}"), "2;32")
-    }
-
-    fn depth_root(&self, text: &str) -> String {
-        self.paint(text, "2;32")
-    }
-
-    fn root(&self, text: &str) -> String {
-        self.paint(format!("[{text}]"), "1;30;42")
-    }
-
-    fn direct(&self, text: &str) -> String {
-        self.paint(format!("[{text}]"), "1;30;44")
-    }
-
-    fn edge_tag(&self, text: &str) -> String {
-        self.paint(format!("[{text}]"), "2;34")
-    }
-
-    fn warn_tag(&self, text: String) -> String {
-        self.paint(format!("[{text}]"), "1;33")
-    }
-
-    fn muted(&self, text: &str) -> String {
-        self.paint(text, "2;37")
-    }
-
-    fn warn(&self, text: &str) -> String {
-        self.paint(text, "33")
-    }
 }
 
 #[allow(dead_code)]
