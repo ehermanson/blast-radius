@@ -15,6 +15,9 @@ use walk::{ConsumerLink, build_reverse_links, compute_root_impacts, run_bfs};
 mod result;
 use result::{ResultMetadata, build_result, collect_workspaces};
 
+mod diagnostics;
+use diagnostics::count_unresolved_imports;
+
 struct AnalysisData<'a> {
     context: &'a RepoContext,
     modules: &'a BTreeMap<PathBuf, ModuleFacts>,
@@ -46,7 +49,7 @@ impl<'a> ResolutionCache<'a> {
         resolution
     }
 
-    fn is_internal_specifier(&self, importer: &Path, specifier: &str) -> bool {
+    pub(super) fn is_internal_specifier(&self, importer: &Path, specifier: &str) -> bool {
         self.resolver.is_internal_specifier(importer, specifier)
     }
 }
@@ -318,63 +321,6 @@ fn normalize_input_path(repo_root: &Path, path: &Path) -> Result<PathBuf> {
     joined
         .canonicalize()
         .with_context(|| format!("failed to resolve input path {}", joined.display()))
-}
-
-fn count_unresolved_imports(
-    modules: &BTreeMap<PathBuf, ModuleFacts>,
-    resolution_cache: &mut ResolutionCache<'_>,
-) -> usize {
-    let mut count = 0;
-
-    for module in modules.values() {
-        for import in &module.imports {
-            if !should_count_unresolved_import(import) {
-                continue;
-            }
-            if !resolution_cache.is_internal_specifier(&module.file, &import.source) {
-                continue;
-            }
-            if matches!(
-                resolution_cache.resolve(&module.file, &import.source),
-                Resolution::Unresolved
-            ) {
-                count += 1;
-            }
-        }
-    }
-
-    count
-}
-
-fn should_count_unresolved_import(import: &crate::parse::ImportFact) -> bool {
-    if import.type_only {
-        return false;
-    }
-
-    let source = import.source.as_str();
-    if source.contains(".velite") {
-        return false;
-    }
-    if source.contains("/+types/") || source.starts_with("./+types/") {
-        return false;
-    }
-    if source.ends_with("package.json") {
-        return false;
-    }
-    if source.ends_with(".svg") {
-        return false;
-    }
-    if source.contains("styled-system/recipes")
-        || source.contains("styled-system/patterns")
-        || source.contains("styled-system/css")
-    {
-        return false;
-    }
-    if source.contains("/dist/esm/") || source.contains("/dist/cjs/") {
-        return false;
-    }
-
-    true
 }
 
 pub(super) fn file_id(path: &Path) -> String {
