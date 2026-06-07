@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
@@ -15,6 +15,8 @@ const JAVASCRIPT_RESOLUTION_EXTENSIONS: &[&str] =
 pub struct Resolver {
     repo_root: PathBuf,
     source_files: HashSet<PathBuf>,
+    suffix_index: BTreeMap<PathBuf, PathBuf>,
+    java_package_index: BTreeMap<PathBuf, Vec<PathBuf>>,
     packages: Vec<PackageInfo>,
     tsconfigs: Vec<TsConfigPath>,
 }
@@ -67,6 +69,8 @@ impl Resolver {
         Ok(Self {
             repo_root: context.repo_root.clone(),
             source_files: context.source_files.iter().cloned().collect(),
+            suffix_index: build_suffix_index(&context.repo_root, &context.source_files),
+            java_package_index: build_java_package_index(&context.repo_root, &context.source_files),
             packages,
             tsconfigs: context.tsconfigs.clone(),
         })
@@ -354,10 +358,8 @@ impl Resolver {
             }
         }
 
-        let suffix = PathBuf::from(format!("{specifier}.rb"));
-        self.source_files
-            .iter()
-            .find(|file| file.ends_with(&suffix))
+        self.suffix_index
+            .get(&PathBuf::from(format!("{specifier}.rb")))
             .cloned()
     }
 
@@ -365,17 +367,14 @@ impl Resolver {
     fn resolve_java_import(&self, specifier: &str) -> Option<PathBuf> {
         if specifier.ends_with(".*") {
             let package_path = specifier.trim_end_matches(".*").replace('.', "/");
-            return self.source_files.iter().find_map(|file| {
-                file.parent()
-                    .filter(|parent| parent.ends_with(&package_path))
-                    .map(|_| file.clone())
-            });
+            return self
+                .java_package_index
+                .get(&PathBuf::from(package_path))
+                .and_then(|files| files.first().cloned());
         }
 
-        let suffix = PathBuf::from(format!("{}.java", specifier.replace('.', "/")));
-        self.source_files
-            .iter()
-            .find(|file| file.ends_with(&suffix))
+        self.suffix_index
+            .get(&PathBuf::from(format!("{}.java", specifier.replace('.', "/"))))
             .cloned()
     }
 
@@ -572,6 +571,63 @@ fn rust_parent_module_base(importer: &Path) -> PathBuf {
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or(child_base)
+}
+
+fn build_suffix_index(repo_root: &Path, source_files: &[PathBuf]) -> BTreeMap<PathBuf, PathBuf> {
+    let mut index = BTreeMap::new();
+
+    for file in source_files {
+        let Some(ext) = file.extension().and_then(|ext| ext.to_str()) else {
+            continue;
+        };
+        if !matches!(ext, "rb" | "java") {
+            continue;
+        }
+
+        let relative = file.strip_prefix(repo_root).unwrap_or(file);
+        for suffix in path_suffixes(relative) {
+            index.entry(suffix).or_insert_with(|| file.clone());
+        }
+    }
+
+    index
+}
+
+fn build_java_package_index(
+    repo_root: &Path,
+    source_files: &[PathBuf],
+) -> BTreeMap<PathBuf, Vec<PathBuf>> {
+    let mut index: BTreeMap<PathBuf, Vec<PathBuf>> = BTreeMap::new();
+
+    for file in source_files {
+        if file.extension().and_then(|ext| ext.to_str()) != Some("java") {
+            continue;
+        }
+        let Some(parent) = file.strip_prefix(repo_root).unwrap_or(file).parent() else {
+            continue;
+        };
+
+        for suffix in path_suffixes(parent) {
+            index.entry(suffix).or_default().push(file.clone());
+        }
+    }
+
+    index
+}
+
+fn path_suffixes(path: &Path) -> Vec<PathBuf> {
+    let components: Vec<_> = path.iter().collect();
+    let mut suffixes = Vec::new();
+
+    for start in 0..components.len() {
+        let mut suffix = PathBuf::new();
+        for component in &components[start..] {
+            suffix.push(Path::new(*component));
+        }
+        suffixes.push(suffix);
+    }
+
+    suffixes
 }
 
 fn load_package_info(path: &Path) -> Result<Option<PackageInfo>> {
@@ -972,5 +1028,61 @@ mod tests {
         ));
         assert!(resolver.is_internal_specifier(&email, "crate::models"));
         assert!(!resolver.is_internal_specifier(&email, "serde"));
+    }
+
+    #[cfg(feature = "ruby")]
+    #[test]
+    fn resolves_ruby_suffix_imports_from_index() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("app/services")).unwrap();
+        fs::create_dir_all(dir.path().join("app/utils")).unwrap();
+        fs::write(dir.path().join("app/services/email.rb"), "class Email; end").unwrap();
+        fs::write(
+            dir.path().join("app/utils/formatter.rb"),
+            "class Formatter; end",
+        )
+        .unwrap();
+
+        let context = RepoContext::discover(dir.path()).unwrap();
+        let resolver = Resolver::new(&context).unwrap();
+        let importer = dir.path().join("app/services/email.rb");
+
+        assert!(matches!(
+            resolver.resolve(&importer, "utils/formatter"),
+            Resolution::Resolved(path) if path.ends_with("app/utils/formatter.rb")
+        ));
+    }
+
+    #[cfg(feature = "java")]
+    #[test]
+    fn resolves_java_class_and_wildcard_imports_from_index() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("src/main/java/com/example/service")).unwrap();
+        fs::create_dir_all(dir.path().join("src/main/java/com/example/util")).unwrap();
+        fs::write(
+            dir.path().join("src/main/java/com/example/service/EmailService.java"),
+            "package com.example.service; class EmailService {}",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("src/main/java/com/example/util/Formatter.java"),
+            "package com.example.util; class Formatter {}",
+        )
+        .unwrap();
+
+        let context = RepoContext::discover(dir.path()).unwrap();
+        let resolver = Resolver::new(&context).unwrap();
+        let importer = dir
+            .path()
+            .join("src/main/java/com/example/service/EmailService.java");
+
+        assert!(matches!(
+            resolver.resolve(&importer, "com.example.util.Formatter"),
+            Resolution::Resolved(path) if path.ends_with("src/main/java/com/example/util/Formatter.java")
+        ));
+        assert!(matches!(
+            resolver.resolve(&importer, "com.example.util.*"),
+            Resolution::Resolved(path) if path.ends_with("src/main/java/com/example/util/Formatter.java")
+        ));
     }
 }
