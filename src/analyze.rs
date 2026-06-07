@@ -57,7 +57,8 @@ impl<'a> ResolutionCache<'a> {
 pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
     let resolver = Resolver::new(context)?;
     let mut resolution_cache = ResolutionCache::new(&resolver);
-    let (modules, parse_warnings, parse_failures) = load_modules(context);
+    let (modules, mut warnings, parse_failures) = load_modules(context);
+    warnings.extend(resolver.warnings());
     let module_states = build_module_states(&modules);
     let reverse = build_reverse_links(&modules, &module_states, &mut resolution_cache);
     let unresolved_imports = count_unresolved_imports(&modules, &mut resolution_cache);
@@ -87,7 +88,7 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
                     export_name: export_name.clone(),
                 },
                 &analysis_data,
-                parse_warnings,
+                warnings,
                 parse_failures,
                 unresolved_imports,
                 vec![(file, exports)],
@@ -108,7 +109,7 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
                 AnalysisMode::File,
                 AnalysisTarget::File { file: file.clone() },
                 &analysis_data,
-                parse_warnings,
+                warnings,
                 parse_failures,
                 unresolved_imports,
                 vec![(file, exports)],
@@ -134,7 +135,7 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
                 AnalysisMode::Files,
                 AnalysisTarget::Files { files: normalized },
                 &analysis_data,
-                parse_warnings,
+                warnings,
                 parse_failures,
                 unresolved_imports,
                 roots,

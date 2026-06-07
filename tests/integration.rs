@@ -844,6 +844,40 @@ fn ruby_file_mode_reports_transitive_blast_radius() {
     assert!(labels.iter().any(|label| label == "lib/app.rb"));
 }
 
+#[cfg(feature = "ruby")]
+#[test]
+fn ruby_suffix_ambiguity_is_reported_as_warning() {
+    let repo = tempdir().unwrap();
+    fs::create_dir_all(repo.path().join("app/utils")).unwrap();
+    fs::create_dir_all(repo.path().join("lib/utils")).unwrap();
+    fs::write(
+        repo.path().join("app/utils/formatter.rb"),
+        "class Formatter; end",
+    )
+    .unwrap();
+    fs::write(
+        repo.path().join("lib/utils/formatter.rb"),
+        "class Formatter; end",
+    )
+    .unwrap();
+    fs::write(
+        repo.path().join("lib/app.rb"),
+        "require 'utils/formatter'\nclass App; end",
+    )
+    .unwrap();
+
+    let json = run_json(repo.path(), &["file", "lib/app.rb"]);
+    let warnings = json["warnings"].as_array().unwrap();
+    assert!(warnings.iter().any(|warning| {
+        warning
+            .as_str()
+            .is_some_and(|warning| warning.contains("ambiguous suffix resolution"))
+            && warning
+                .as_str()
+                .is_some_and(|warning| warning.contains("utils/formatter.rb"))
+    }));
+}
+
 #[cfg(feature = "java")]
 #[test]
 fn java_file_mode_reports_transitive_blast_radius() {
@@ -886,4 +920,41 @@ fn java_file_mode_reports_transitive_blast_radius() {
             .iter()
             .any(|label| label == "src/main/java/com/example/App.java")
     );
+}
+
+#[cfg(feature = "java")]
+#[test]
+fn java_suffix_ambiguity_is_reported_as_warning() {
+    let repo = tempdir().unwrap();
+    fs::create_dir_all(repo.path().join("src/main/java/com/example/model")).unwrap();
+    fs::create_dir_all(repo.path().join("src/test/java/com/example/model")).unwrap();
+    fs::create_dir_all(repo.path().join("src/main/java/com/example")).unwrap();
+    fs::write(
+        repo.path()
+            .join("src/main/java/com/example/model/User.java"),
+        "package com.example.model; public class User {}",
+    )
+    .unwrap();
+    fs::write(
+        repo.path()
+            .join("src/test/java/com/example/model/User.java"),
+        "package com.example.model; public class User {}",
+    )
+    .unwrap();
+    fs::write(
+        repo.path().join("src/main/java/com/example/App.java"),
+        "package com.example; import com.example.model.User; public class App {}",
+    )
+    .unwrap();
+
+    let json = run_json(repo.path(), &["file", "src/main/java/com/example/App.java"]);
+    let warnings = json["warnings"].as_array().unwrap();
+    assert!(warnings.iter().any(|warning| {
+        warning
+            .as_str()
+            .is_some_and(|warning| warning.contains("ambiguous suffix resolution"))
+            && warning
+                .as_str()
+                .is_some_and(|warning| warning.contains("com/example/model/User.java"))
+    }));
 }
