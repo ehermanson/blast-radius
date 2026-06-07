@@ -1147,10 +1147,7 @@ fn literal_string(expr: &Expr) -> Option<String> {
 
 fn member_path_from_assign_target(target: &AssignTarget) -> Option<Vec<&str>> {
     match target {
-        AssignTarget::Simple(simple) => match simple {
-            SimpleAssignTarget::Member(member) => member_path(member),
-            _ => None,
-        },
+        AssignTarget::Simple(SimpleAssignTarget::Member(member)) => member_path(member),
         _ => None,
     }
 }
@@ -1260,13 +1257,13 @@ impl Visit for UsageCollector {
     fn visit_member_expr(&mut self, member: &MemberExpr) {
         if let Expr::Ident(object) = &*member.obj {
             let namespace = object.sym.to_string();
-            if self.namespace_locals.contains(&namespace) {
-                if let MemberProp::Ident(prop) = &member.prop {
-                    self.namespace_member_usage
-                        .entry(namespace)
-                        .or_default()
-                        .insert(prop.sym.to_string());
-                }
+            if self.namespace_locals.contains(&namespace)
+                && let MemberProp::Ident(prop) = &member.prop
+            {
+                self.namespace_member_usage
+                    .entry(namespace)
+                    .or_default()
+                    .insert(prop.sym.to_string());
             }
         }
 

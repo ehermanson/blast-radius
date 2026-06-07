@@ -80,16 +80,9 @@ pub enum AnalysisMode {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AnalysisTarget {
-    Export {
-        file: PathBuf,
-        export_name: String,
-    },
-    File {
-        file: PathBuf,
-    },
-    Files {
-        files: Vec<PathBuf>,
-    },
+    Export { file: PathBuf, export_name: String },
+    File { file: PathBuf },
+    Files { files: Vec<PathBuf> },
 }
 
 #[derive(Debug, Clone, Serialize, Default)]

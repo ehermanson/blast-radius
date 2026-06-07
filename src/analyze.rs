@@ -66,6 +66,13 @@ struct ResultMetadata {
     root_impacts: Vec<RootImpact>,
 }
 
+struct AnalysisData<'a> {
+    context: &'a RepoContext,
+    modules: &'a BTreeMap<PathBuf, ModuleFacts>,
+    module_states: &'a BTreeMap<PathBuf, ModuleState>,
+    reverse: &'a BTreeMap<PathBuf, Vec<ConsumerLink>>,
+}
+
 struct ResolutionCache<'a> {
     resolver: &'a Resolver,
     entries: BTreeMap<(PathBuf, String), Resolution>,
@@ -102,6 +109,12 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
     let module_states = build_module_states(&modules);
     let reverse = build_reverse_links(&modules, &module_states, &mut resolution_cache);
     let unresolved_imports = count_unresolved_imports(&modules, &mut resolution_cache);
+    let analysis_data = AnalysisData {
+        context,
+        modules: &modules,
+        module_states: &module_states,
+        reverse: &reverse,
+    };
 
     match &cli.command {
         Command::Export { file, export_name } => {
@@ -121,10 +134,7 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
                     file: file.clone(),
                     export_name: export_name.clone(),
                 },
-                context,
-                &modules,
-                &module_states,
-                &reverse,
+                &analysis_data,
                 parse_warnings,
                 parse_failures,
                 unresolved_imports,
@@ -154,10 +164,7 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
             analyze_from_roots(
                 AnalysisMode::File,
                 AnalysisTarget::File { file: file.clone() },
-                context,
-                &modules,
-                &module_states,
-                &reverse,
+                &analysis_data,
                 parse_warnings,
                 parse_failures,
                 unresolved_imports,
@@ -192,10 +199,7 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
             analyze_from_roots(
                 AnalysisMode::Files,
                 AnalysisTarget::Files { files: normalized },
-                context,
-                &modules,
-                &module_states,
-                &reverse,
+                &analysis_data,
                 parse_warnings,
                 parse_failures,
                 unresolved_imports,
@@ -304,21 +308,21 @@ fn build_reverse_links(
                     },
                 });
 
-            if let Some(consumer_state) = module_states.get(&module.file) {
-                if let Some(exported_names) = consumer_state.local_to_exports.get(&import.local) {
-                    for exported in exported_names {
-                        reverse
-                            .entry(target.clone())
-                            .or_default()
-                            .push(ConsumerLink {
-                                consumer_file: module.file.clone(),
-                                relation: ConsumerRelation::LocalExport {
-                                    imported: import.imported.clone(),
-                                    local: import.local.clone(),
-                                    exported: exported.clone(),
-                                },
-                            });
-                    }
+            if let Some(consumer_state) = module_states.get(&module.file)
+                && let Some(exported_names) = consumer_state.local_to_exports.get(&import.local)
+            {
+                for exported in exported_names {
+                    reverse
+                        .entry(target.clone())
+                        .or_default()
+                        .push(ConsumerLink {
+                            consumer_file: module.file.clone(),
+                            relation: ConsumerRelation::LocalExport {
+                                imported: import.imported.clone(),
+                                local: import.local.clone(),
+                                exported: exported.clone(),
+                            },
+                        });
                 }
             }
         }
@@ -354,16 +358,14 @@ fn build_reverse_links(
 fn analyze_from_roots(
     mode: AnalysisMode,
     target: AnalysisTarget,
-    context: &RepoContext,
-    modules: &BTreeMap<PathBuf, ModuleFacts>,
-    module_states: &BTreeMap<PathBuf, ModuleState>,
-    reverse: &BTreeMap<PathBuf, Vec<ConsumerLink>>,
+    data: &AnalysisData<'_>,
     mut warnings: Vec<String>,
     parse_failures: usize,
     unresolved_imports: usize,
     roots: Vec<(PathBuf, BTreeSet<String>)>,
 ) -> Result<AnalysisResult> {
-    let ambiguous_edges = modules
+    let ambiguous_edges = data
+        .modules
         .values()
         .map(|module| {
             let star_reexport_count = module
@@ -392,20 +394,20 @@ fn analyze_from_roots(
             ),
         );
     }
-    let workspaces = collect_workspaces(context);
+    let workspaces = collect_workspaces(data.context);
 
-    let (states, reasons) = run_bfs(&roots, modules, module_states, reverse);
+    let (states, reasons) = run_bfs(&roots, data.modules, data.module_states, data.reverse);
 
     // For a multi-file run, also compute each file's blast radius on its own so
     // the report can break impact down per file.
     let root_impacts = if roots.len() > 1 {
         compute_root_impacts(
             &roots,
-            modules,
-            module_states,
-            reverse,
+            data.modules,
+            data.module_states,
+            data.reverse,
             &workspaces,
-            &context.repo_root,
+            &data.context.repo_root,
         )
     } else {
         Vec::new()
@@ -422,7 +424,7 @@ fn analyze_from_roots(
         root_impacts,
     };
 
-    let result = build_result(context, module_states, states, reasons, metadata);
+    let result = build_result(data.context, data.module_states, states, reasons, metadata);
 
     Ok(result)
 }
@@ -599,8 +601,7 @@ fn compute_root_impacts(
     let mut impacts: Vec<RootImpact> = roots
         .iter()
         .map(|root| {
-            let (states, _) =
-                run_bfs(std::slice::from_ref(root), modules, module_states, reverse);
+            let (states, _) = run_bfs(std::slice::from_ref(root), modules, module_states, reverse);
 
             let mut direct = 0;
             let mut indirect = 0;
@@ -861,9 +862,9 @@ fn normalize_input_path(repo_root: &Path, path: &Path) -> Result<PathBuf> {
     } else {
         repo_root.join(path)
     };
-    Ok(joined
+    joined
         .canonicalize()
-        .with_context(|| format!("failed to resolve input path {}", joined.display()))?)
+        .with_context(|| format!("failed to resolve input path {}", joined.display()))
 }
 
 fn count_unresolved_imports(

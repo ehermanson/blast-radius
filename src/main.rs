@@ -15,10 +15,10 @@ fn main() -> Result<ExitCode> {
         println!("{output}");
     }
 
-    if let Some(threshold) = app.fail_threshold {
-        if result.summary.total_affected_files > threshold {
-            return Ok(ExitCode::from(2));
-        }
+    if let Some(threshold) = app.fail_threshold
+        && result.summary.total_affected_files > threshold
+    {
+        return Ok(ExitCode::from(2));
     }
 
     Ok(ExitCode::SUCCESS)

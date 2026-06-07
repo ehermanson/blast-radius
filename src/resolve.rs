@@ -16,7 +16,9 @@ const JAVASCRIPT_RESOLUTION_EXTENSIONS: &[&str] =
 pub struct Resolver {
     repo_root: PathBuf,
     source_files: HashSet<PathBuf>,
+    #[cfg(any(feature = "ruby", feature = "java"))]
     suffix_index: BTreeMap<PathBuf, PathBuf>,
+    #[cfg(feature = "java")]
     java_package_index: BTreeMap<PathBuf, Vec<PathBuf>>,
     packages: Vec<PackageInfo>,
     package_by_name: BTreeMap<String, usize>,
@@ -75,7 +77,9 @@ impl Resolver {
         Ok(Self {
             repo_root: context.repo_root.clone(),
             source_files: context.source_files.iter().cloned().collect(),
+            #[cfg(any(feature = "ruby", feature = "java"))]
             suffix_index: build_suffix_index(&context.repo_root, &context.source_files),
+            #[cfg(feature = "java")]
             java_package_index: build_java_package_index(&context.repo_root, &context.source_files),
             packages,
             package_by_name,
@@ -84,7 +88,7 @@ impl Resolver {
     }
 
     pub fn resolve(&self, importer: &Path, specifier: &str) -> Resolution {
-        let importer = clean_path(importer);
+        let importer = self.normalize_importer(importer);
 
         #[cfg(feature = "python")]
         if is_python_file(&importer) {
@@ -133,6 +137,15 @@ impl Resolver {
         Resolution::Unresolved
     }
 
+    fn normalize_importer(&self, importer: &Path) -> PathBuf {
+        let cleaned = clean_path(importer);
+        if self.source_files.contains(&cleaned) {
+            return cleaned;
+        }
+
+        importer.canonicalize().unwrap_or(cleaned)
+    }
+
     pub fn is_internal_specifier(&self, importer: &Path, specifier: &str) -> bool {
         #[cfg(feature = "python")]
         if is_python_file(importer) {
@@ -169,15 +182,14 @@ impl Resolver {
             return true;
         }
 
-        if let Some(tsconfig) = self.nearest_tsconfig(importer) {
-            if tsconfig
+        if let Some(tsconfig) = self.nearest_tsconfig(importer)
+            && tsconfig
                 .compiler_options
                 .paths
                 .keys()
                 .any(|pattern| match_alias(pattern, specifier).is_some())
-            {
-                return true;
-            }
+        {
+            return true;
         }
 
         package_specifier_parts(specifier)
@@ -303,10 +315,10 @@ impl Resolver {
             let Some(name) = file.file_name().and_then(|name| name.to_str()) else {
                 continue;
             };
-            if matches!(name, "lib.rs" | "main.rs") {
-                if let Some(parent) = file.parent() {
-                    roots.push(parent.to_path_buf());
-                }
+            if matches!(name, "lib.rs" | "main.rs")
+                && let Some(parent) = file.parent()
+            {
+                roots.push(parent.to_path_buf());
             }
         }
         roots.sort();
@@ -379,7 +391,10 @@ impl Resolver {
         }
 
         self.suffix_index
-            .get(&PathBuf::from(format!("{}.java", specifier.replace('.', "/"))))
+            .get(&PathBuf::from(format!(
+                "{}.java",
+                specifier.replace('.', "/")
+            )))
             .cloned()
     }
 
@@ -489,13 +504,13 @@ impl Resolver {
             }
         }
 
-        if let Some(ext) = candidate.extension().and_then(|ext| ext.to_str()) {
-            if !resolution_extensions().contains(&ext) {
-                for extension in resolution_extensions() {
-                    let path = candidate.with_extension(format!("{ext}.{extension}"));
-                    if self.source_files.contains(&path) {
-                        return Some(path);
-                    }
+        if let Some(ext) = candidate.extension().and_then(|ext| ext.to_str())
+            && !resolution_extensions().contains(&ext)
+        {
+            for extension in resolution_extensions() {
+                let path = candidate.with_extension(format!("{ext}.{extension}"));
+                if self.source_files.contains(&path) {
+                    return Some(path);
                 }
             }
         }
@@ -585,6 +600,7 @@ fn rust_parent_module_base(importer: &Path) -> PathBuf {
         .unwrap_or(child_base)
 }
 
+#[cfg(any(feature = "ruby", feature = "java"))]
 fn build_suffix_index(repo_root: &Path, source_files: &[PathBuf]) -> BTreeMap<PathBuf, PathBuf> {
     let mut index = BTreeMap::new();
 
@@ -605,6 +621,7 @@ fn build_suffix_index(repo_root: &Path, source_files: &[PathBuf]) -> BTreeMap<Pa
     index
 }
 
+#[cfg(feature = "java")]
 fn build_java_package_index(
     repo_root: &Path,
     source_files: &[PathBuf],
@@ -627,6 +644,7 @@ fn build_java_package_index(
     index
 }
 
+#[cfg(any(feature = "ruby", feature = "java"))]
 fn path_suffixes(path: &Path) -> Vec<PathBuf> {
     let components: Vec<_> = path.iter().collect();
     let mut suffixes = Vec::new();
@@ -677,10 +695,11 @@ fn load_package_info(path: &Path) -> Result<Option<PackageInfo>> {
 
     let root = path.parent().unwrap_or(path).to_path_buf();
     let mut entry_candidates = Vec::new();
-    for field in [parsed.source, parsed.module, parsed.types, parsed.main] {
-        if let Some(value) = field {
-            entry_candidates.push(root.join(value));
-        }
+    for value in [parsed.source, parsed.module, parsed.types, parsed.main]
+        .into_iter()
+        .flatten()
+    {
+        entry_candidates.push(root.join(value));
     }
     entry_candidates.push(root.join("src/index.ts"));
     entry_candidates.push(root.join("src/index.tsx"));
@@ -1095,12 +1114,14 @@ mod tests {
         fs::create_dir_all(dir.path().join("src/main/java/com/example/service")).unwrap();
         fs::create_dir_all(dir.path().join("src/main/java/com/example/util")).unwrap();
         fs::write(
-            dir.path().join("src/main/java/com/example/service/EmailService.java"),
+            dir.path()
+                .join("src/main/java/com/example/service/EmailService.java"),
             "package com.example.service; class EmailService {}",
         )
         .unwrap();
         fs::write(
-            dir.path().join("src/main/java/com/example/util/Formatter.java"),
+            dir.path()
+                .join("src/main/java/com/example/util/Formatter.java"),
             "package com.example.util; class Formatter {}",
         )
         .unwrap();
