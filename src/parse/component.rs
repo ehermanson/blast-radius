@@ -2,9 +2,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use super::{
-    ExportFact, ExportKind, ModuleFacts, module_facts_from_javascript_module, parse_source,
-};
+use super::javascript::{module_facts_from_javascript_module, parse_source};
+use super::{ExportFact, ExportKind, ModuleFacts};
 
 pub(super) fn parse_component_module(path: &Path, source: &str, kind: &str) -> Result<ModuleFacts> {
     let script = extract_component_scripts(source);
