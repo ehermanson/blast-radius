@@ -174,5 +174,8 @@ make quality-java
 
 See `docs/quality.md` for what each command validates.
 
+See `docs/local-toolchain.md` for install instructions and non-blocking
+pre-commit/pre-push hook examples.
+
 See `docs/language-support.md` for the multi-language architecture and next
 language-adapter work.
