@@ -25,6 +25,20 @@ pub struct ModuleFacts {
     pub warnings: Vec<String>,
 }
 
+impl ModuleFacts {
+    fn empty(file: &Path) -> Self {
+        Self {
+            file: file.to_path_buf(),
+            exports: Vec::new(),
+            imports: Vec::new(),
+            reexports: Vec::new(),
+            used_locals: BTreeSet::new(),
+            namespace_member_usage: BTreeMap::new(),
+            warnings: Vec::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ExportFact {
     pub exported: String,
@@ -121,15 +135,7 @@ fn parse_javascript_module(path: &Path, source: &str) -> Result<ModuleFacts> {
 }
 
 fn module_facts_from_javascript_module(path: &Path, module: &Module) -> Result<ModuleFacts> {
-    let mut facts = ModuleFacts {
-        file: path.to_path_buf(),
-        exports: Vec::new(),
-        imports: Vec::new(),
-        reexports: Vec::new(),
-        used_locals: BTreeSet::new(),
-        namespace_member_usage: BTreeMap::new(),
-        warnings: Vec::new(),
-    };
+    let mut facts = ModuleFacts::empty(path);
 
     for item in &module.body {
         match item {
@@ -280,15 +286,7 @@ fn parse_python_module(path: &Path, source: &str) -> Result<ModuleFacts> {
     let suite = py_ast::Suite::parse(source, &path.display().to_string()).map_err(|error| {
         anyhow::anyhow!("failed to parse python module {}: {error}", path.display())
     })?;
-    let mut facts = ModuleFacts {
-        file: path.to_path_buf(),
-        exports: Vec::new(),
-        imports: Vec::new(),
-        reexports: Vec::new(),
-        used_locals: BTreeSet::new(),
-        namespace_member_usage: BTreeMap::new(),
-        warnings: Vec::new(),
-    };
+    let mut facts = ModuleFacts::empty(path);
 
     for stmt in &suite {
         collect_python_stmt(stmt, &mut facts);
@@ -438,15 +436,7 @@ fn add_python_export(facts: &mut ModuleFacts, name: String) {
 fn parse_rust_module(path: &Path, source: &str) -> Result<ModuleFacts> {
     let file = rs_ast::parse_file(source)
         .with_context(|| format!("failed to parse rust module {}", path.display()))?;
-    let mut facts = ModuleFacts {
-        file: path.to_path_buf(),
-        exports: Vec::new(),
-        imports: Vec::new(),
-        reexports: Vec::new(),
-        used_locals: BTreeSet::new(),
-        namespace_member_usage: BTreeMap::new(),
-        warnings: Vec::new(),
-    };
+    let mut facts = ModuleFacts::empty(path);
 
     for item in &file.items {
         collect_rust_item(item, &mut facts);
@@ -652,15 +642,7 @@ fn is_public(vis: &rs_ast::Visibility) -> bool {
 
 #[cfg(feature = "ruby")]
 fn parse_ruby_module(path: &Path, source: &str) -> Result<ModuleFacts> {
-    let mut facts = ModuleFacts {
-        file: path.to_path_buf(),
-        exports: Vec::new(),
-        imports: Vec::new(),
-        reexports: Vec::new(),
-        used_locals: BTreeSet::new(),
-        namespace_member_usage: BTreeMap::new(),
-        warnings: Vec::new(),
-    };
+    let mut facts = ModuleFacts::empty(path);
 
     for line in source.lines() {
         let line = line.trim();
@@ -772,15 +754,7 @@ fn add_ruby_export(facts: &mut ModuleFacts, name: String) {
 
 #[cfg(feature = "java")]
 fn parse_java_module(path: &Path, source: &str) -> Result<ModuleFacts> {
-    let mut facts = ModuleFacts {
-        file: path.to_path_buf(),
-        exports: Vec::new(),
-        imports: Vec::new(),
-        reexports: Vec::new(),
-        used_locals: BTreeSet::new(),
-        namespace_member_usage: BTreeMap::new(),
-        warnings: Vec::new(),
-    };
+    let mut facts = ModuleFacts::empty(path);
 
     for line in source.lines() {
         let line = line.trim();
