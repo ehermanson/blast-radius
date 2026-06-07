@@ -18,6 +18,7 @@ pub struct Resolver {
     suffix_index: BTreeMap<PathBuf, PathBuf>,
     java_package_index: BTreeMap<PathBuf, Vec<PathBuf>>,
     packages: Vec<PackageInfo>,
+    package_by_name: BTreeMap<String, usize>,
     tsconfigs: Vec<TsConfigPath>,
 }
 
@@ -65,6 +66,10 @@ impl Resolver {
                 packages.push(package);
             }
         }
+        let mut package_by_name = BTreeMap::new();
+        for (index, package) in packages.iter().enumerate() {
+            package_by_name.entry(package.name.clone()).or_insert(index);
+        }
 
         Ok(Self {
             repo_root: context.repo_root.clone(),
@@ -72,6 +77,7 @@ impl Resolver {
             suffix_index: build_suffix_index(&context.repo_root, &context.source_files),
             java_package_index: build_java_package_index(&context.repo_root, &context.source_files),
             packages,
+            package_by_name,
             tsconfigs: context.tsconfigs.clone(),
         })
     }
@@ -173,9 +179,9 @@ impl Resolver {
             }
         }
 
-        self.packages.iter().any(|package| {
-            specifier == package.name || specifier.starts_with(&format!("{}/", package.name))
-        })
+        package_specifier_parts(specifier)
+            .map(|(package_name, _)| self.package_by_name.contains_key(package_name))
+            .unwrap_or(false)
     }
 
     #[cfg(feature = "python")]
@@ -410,38 +416,42 @@ impl Resolver {
     }
 
     fn resolve_workspace_package(&self, specifier: &str) -> Option<PathBuf> {
-        for package in &self.packages {
-            if specifier == package.name {
-                if let Some(resolved) = resolve_package_export(package, ".")
-                    .and_then(|path| self.try_resolve_candidate(&path))
-                {
-                    return Some(resolved);
-                }
+        let (package_name, rest) = package_specifier_parts(specifier)?;
+        let package = self
+            .package_by_name
+            .get(package_name)
+            .and_then(|index| self.packages.get(*index))?;
 
-                for candidate in &package.entry_candidates {
-                    if let Some(resolved) = self.try_resolve_candidate(candidate) {
-                        return Some(resolved);
-                    }
-                }
+        if let Some(rest) = rest {
+            let export_key = format!("./{rest}");
+            if let Some(resolved) = resolve_package_export(package, &export_key)
+                .and_then(|path| self.try_resolve_candidate(&path))
+            {
+                return Some(resolved);
             }
 
-            if let Some(rest) = specifier.strip_prefix(&format!("{}/", package.name)) {
-                let export_key = format!("./{rest}");
-                if let Some(resolved) = resolve_package_export(package, &export_key)
-                    .and_then(|path| self.try_resolve_candidate(&path))
-                {
-                    return Some(resolved);
-                }
+            let direct = package.root.join(rest);
+            if let Some(resolved) = self.try_resolve_candidate(&direct) {
+                return Some(resolved);
+            }
 
-                let direct = package.root.join(rest);
-                if let Some(resolved) = self.try_resolve_candidate(&direct) {
-                    return Some(resolved);
-                }
+            let src_direct = package.root.join("src").join(rest);
+            if let Some(resolved) = self.try_resolve_candidate(&src_direct) {
+                return Some(resolved);
+            }
 
-                let src_direct = package.root.join("src").join(rest);
-                if let Some(resolved) = self.try_resolve_candidate(&src_direct) {
-                    return Some(resolved);
-                }
+            return None;
+        }
+
+        if let Some(resolved) =
+            resolve_package_export(package, ".").and_then(|path| self.try_resolve_candidate(&path))
+        {
+            return Some(resolved);
+        }
+
+        for candidate in &package.entry_candidates {
+            if let Some(resolved) = self.try_resolve_candidate(candidate) {
+                return Some(resolved);
             }
         }
 
@@ -626,6 +636,29 @@ fn path_suffixes(path: &Path) -> Vec<PathBuf> {
     }
 
     suffixes
+}
+
+fn package_specifier_parts(specifier: &str) -> Option<(&str, Option<&str>)> {
+    if specifier.is_empty() || specifier.starts_with('.') || specifier.starts_with('/') {
+        return None;
+    }
+
+    if specifier.starts_with('@') {
+        let first_slash = specifier.find('/')?;
+        let rest_start = first_slash + 1;
+        let second_slash = specifier[rest_start..]
+            .find('/')
+            .map(|index| rest_start + index);
+        return match second_slash {
+            Some(index) => Some((&specifier[..index], Some(&specifier[index + 1..]))),
+            None => Some((specifier, None)),
+        };
+    }
+
+    match specifier.split_once('/') {
+        Some((name, rest)) => Some((name, Some(rest))),
+        None => Some((specifier, None)),
+    }
 }
 
 fn load_package_info(path: &Path) -> Result<Option<PackageInfo>> {
