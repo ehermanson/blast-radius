@@ -87,11 +87,10 @@ impl<'a> ResolutionCache<'a> {
 pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
     let resolver = Resolver::new(context)?;
     let mut resolution_cache = ResolutionCache::new(&resolver);
-    let (modules, parse_warnings) = load_modules(context);
+    let (modules, parse_warnings, parse_failures) = load_modules(context);
     let module_states = build_module_states(&modules);
     let reverse = build_reverse_links(&modules, &module_states, &mut resolution_cache);
     let unresolved_imports = count_unresolved_imports(&modules, &mut resolution_cache);
-    let parse_failures = parse_warnings.len();
 
     match &cli.command {
         Command::Export { file, export_name } => {
@@ -195,24 +194,35 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
     }
 }
 
-fn load_modules(context: &RepoContext) -> (BTreeMap<PathBuf, ModuleFacts>, Vec<String>) {
+fn load_modules(context: &RepoContext) -> (BTreeMap<PathBuf, ModuleFacts>, Vec<String>, usize) {
     let mut modules = BTreeMap::new();
     let mut warnings = Vec::new();
+    let mut parse_failures = 0;
     for file in &context.source_files {
         match parse_module(file) {
             Ok(facts) => {
+                let relative = file.strip_prefix(&context.repo_root).unwrap_or(file);
+                warnings.extend(
+                    facts
+                        .warnings
+                        .iter()
+                        .map(|warning| format!("{}: {warning}", relative.display())),
+                );
                 modules.insert(file.clone(), facts);
             }
-            Err(error) => warnings.push(format!(
-                "skipped {}: {}",
-                file.strip_prefix(&context.repo_root)
-                    .unwrap_or(file)
-                    .display(),
-                error
-            )),
+            Err(error) => {
+                parse_failures += 1;
+                warnings.push(format!(
+                    "skipped {}: {}",
+                    file.strip_prefix(&context.repo_root)
+                        .unwrap_or(file)
+                        .display(),
+                    error
+                ));
+            }
         }
     }
-    (modules, warnings)
+    (modules, warnings, parse_failures)
 }
 
 fn build_module_states(modules: &BTreeMap<PathBuf, ModuleFacts>) -> BTreeMap<PathBuf, ModuleState> {
