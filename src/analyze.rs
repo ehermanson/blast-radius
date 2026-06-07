@@ -150,16 +150,7 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
                 );
             }
 
-            let exports = module_states
-                .get(&file)
-                .map(|state| {
-                    if state.public_exports.is_empty() {
-                        BTreeSet::from([String::from("*file*")])
-                    } else {
-                        state.public_exports.clone()
-                    }
-                })
-                .unwrap_or_default();
+            let exports = file_root_exports(&file, &module_states);
 
             analyze_from_roots(
                 AnalysisMode::File,
@@ -182,16 +173,7 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
                         file.display()
                     );
                 }
-                let exports = module_states
-                    .get(&file)
-                    .map(|state| {
-                        if state.public_exports.is_empty() {
-                            BTreeSet::from([String::from("*file*")])
-                        } else {
-                            state.public_exports.clone()
-                        }
-                    })
-                    .unwrap_or_else(|| BTreeSet::from([String::from("*file*")]));
+                let exports = file_root_exports(&file, &module_states);
                 roots.push((file.clone(), exports));
                 normalized.push(file);
             }
@@ -207,6 +189,22 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
             )
         }
     }
+}
+
+fn file_root_exports(
+    file: &Path,
+    module_states: &BTreeMap<PathBuf, ModuleState>,
+) -> BTreeSet<String> {
+    module_states
+        .get(file)
+        .map(|state| {
+            if state.public_exports.is_empty() {
+                BTreeSet::from([String::from("*file*")])
+            } else {
+                state.public_exports.clone()
+            }
+        })
+        .unwrap_or_else(|| BTreeSet::from([String::from("*file*")]))
 }
 
 fn load_modules(context: &RepoContext) -> (BTreeMap<PathBuf, ModuleFacts>, Vec<String>, usize) {
