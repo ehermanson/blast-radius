@@ -210,10 +210,6 @@ impl Resolver {
             return Some(candidate);
         }
 
-        if candidate.extension().is_some() && self.source_files.contains(&candidate) {
-            return Some(candidate);
-        }
-
         for extension in resolution_extensions() {
             let path = candidate.with_extension(extension);
             if self.source_files.contains(&path) {
@@ -232,7 +228,7 @@ impl Resolver {
             }
         }
 
-        if candidate.is_dir() || candidate.extension().is_none() {
+        if candidate.extension().is_none() {
             for extension in resolution_extensions() {
                 let path = candidate.join(format!("index.{extension}"));
                 if self.source_files.contains(&path) {
