@@ -21,15 +21,6 @@ pub struct Cli {
     #[arg(long)]
     pub output: Option<PathBuf>,
 
-    #[arg(long)]
-    pub max_depth: Option<usize>,
-
-    #[arg(long, default_value_t = false)]
-    pub include_tests: bool,
-
-    #[arg(long, default_value_t = false)]
-    pub include_stories: bool,
-
     /// Show the full cascade tree and analyzer internals in tree output.
     #[arg(long, short = 'v', global = true, default_value_t = false)]
     pub verbose: bool,
