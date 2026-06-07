@@ -55,6 +55,17 @@ struct AffectedState {
     file_affected: bool,
 }
 
+struct ResultMetadata {
+    mode: AnalysisMode,
+    target: AnalysisTarget,
+    warnings: Vec<String>,
+    parse_failures: usize,
+    unresolved_imports: usize,
+    ambiguous_edges: usize,
+    workspaces: Vec<Workspace>,
+    root_impacts: Vec<RootImpact>,
+}
+
 struct ResolutionCache<'a> {
     resolver: &'a Resolver,
     entries: BTreeMap<(PathBuf, String), Resolution>,
@@ -400,20 +411,18 @@ fn analyze_from_roots(
         Vec::new()
     };
 
-    let result = build_result(
+    let metadata = ResultMetadata {
         mode,
         target,
-        context,
-        module_states,
-        states,
-        reasons,
         warnings,
         parse_failures,
         unresolved_imports,
         ambiguous_edges,
         workspaces,
         root_impacts,
-    );
+    };
+
+    let result = build_result(context, module_states, states, reasons, metadata);
 
     Ok(result)
 }
@@ -642,20 +651,12 @@ fn compute_root_impacts(
     impacts
 }
 
-#[allow(clippy::too_many_arguments)]
 fn build_result(
-    mode: AnalysisMode,
-    target: AnalysisTarget,
     context: &RepoContext,
     module_states: &BTreeMap<PathBuf, ModuleState>,
     states: BTreeMap<PathBuf, AffectedState>,
     reasons: Vec<ImpactReason>,
-    warnings: Vec<String>,
-    parse_failures: usize,
-    unresolved_imports: usize,
-    ambiguous_edges: usize,
-    workspaces: Vec<Workspace>,
-    root_impacts: Vec<RootImpact>,
+    metadata: ResultMetadata,
 ) -> AnalysisResult {
     let mut nodes = Vec::new();
     let mut edges = Vec::new();
@@ -716,23 +717,23 @@ fn build_result(
     let transitively_affected_files = states.values().filter(|state| state.depth > 1).count();
 
     AnalysisResult {
-        mode,
-        target,
+        mode: metadata.mode,
+        target: metadata.target,
         repo_root: context.repo_root.clone(),
         source_file_count: context.source_files.len(),
         summary: Summary {
             directly_affected_files,
             transitively_affected_files,
             total_affected_files,
-            unresolved_imports,
-            ambiguous_edges,
-            parse_failures,
+            unresolved_imports: metadata.unresolved_imports,
+            ambiguous_edges: metadata.ambiguous_edges,
+            parse_failures: metadata.parse_failures,
         },
-        workspaces,
-        roots: root_impacts,
+        workspaces: metadata.workspaces,
+        roots: metadata.root_impacts,
         nodes,
         edges,
-        warnings,
+        warnings: metadata.warnings,
     }
 }
 
