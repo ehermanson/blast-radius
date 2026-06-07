@@ -56,12 +56,42 @@ struct AffectedState {
     file_affected: bool,
 }
 
+struct ResolutionCache<'a> {
+    resolver: &'a Resolver,
+    entries: BTreeMap<(PathBuf, String), Resolution>,
+}
+
+impl<'a> ResolutionCache<'a> {
+    fn new(resolver: &'a Resolver) -> Self {
+        Self {
+            resolver,
+            entries: BTreeMap::new(),
+        }
+    }
+
+    fn resolve(&mut self, importer: &Path, specifier: &str) -> Resolution {
+        let key = (importer.to_path_buf(), specifier.to_string());
+        if let Some(resolution) = self.entries.get(&key) {
+            return resolution.clone();
+        }
+
+        let resolution = self.resolver.resolve(importer, specifier);
+        self.entries.insert(key, resolution.clone());
+        resolution
+    }
+
+    fn is_internal_specifier(&self, importer: &Path, specifier: &str) -> bool {
+        self.resolver.is_internal_specifier(importer, specifier)
+    }
+}
+
 pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
     let resolver = Resolver::new(context)?;
+    let mut resolution_cache = ResolutionCache::new(&resolver);
     let (modules, parse_warnings) = load_modules(context);
     let module_states = build_module_states(&modules);
-    let reverse = build_reverse_links(&modules, &module_states, &resolver);
-    let unresolved_imports = count_unresolved_imports(&modules, &resolver);
+    let reverse = build_reverse_links(&modules, &module_states, &mut resolution_cache);
+    let unresolved_imports = count_unresolved_imports(&modules, &mut resolution_cache);
     let parse_failures = parse_warnings.len();
 
     match &cli.command {
@@ -211,7 +241,7 @@ fn build_module_states(modules: &BTreeMap<PathBuf, ModuleFacts>) -> BTreeMap<Pat
 fn build_reverse_links(
     modules: &BTreeMap<PathBuf, ModuleFacts>,
     module_states: &BTreeMap<PathBuf, ModuleState>,
-    resolver: &Resolver,
+    resolution_cache: &mut ResolutionCache<'_>,
 ) -> BTreeMap<PathBuf, Vec<ConsumerLink>> {
     let mut reverse: BTreeMap<PathBuf, Vec<ConsumerLink>> = BTreeMap::new();
 
@@ -223,7 +253,8 @@ fn build_reverse_links(
             .count();
 
         for import in &module.imports {
-            let Resolution::Resolved(target) = resolver.resolve(&module.file, &import.source)
+            let Resolution::Resolved(target) =
+                resolution_cache.resolve(&module.file, &import.source)
             else {
                 continue;
             };
@@ -273,7 +304,8 @@ fn build_reverse_links(
         }
 
         for reexport in &module.reexports {
-            let Resolution::Resolved(target) = resolver.resolve(&module.file, &reexport.source)
+            let Resolution::Resolved(target) =
+                resolution_cache.resolve(&module.file, &reexport.source)
             else {
                 continue;
             };
@@ -829,25 +861,28 @@ fn normalize_input_path(repo_root: &Path, path: &Path) -> Result<PathBuf> {
 
 fn count_unresolved_imports(
     modules: &BTreeMap<PathBuf, ModuleFacts>,
-    resolver: &Resolver,
+    resolution_cache: &mut ResolutionCache<'_>,
 ) -> usize {
-    modules
-        .values()
-        .flat_map(|module| {
-            module
-                .imports
-                .iter()
-                .map(move |import| (&module.file, import))
-        })
-        .filter(|(_file, import)| should_count_unresolved_import(import))
-        .filter(|(file, import)| resolver.is_internal_specifier(file, &import.source))
-        .filter(|(file, import)| {
-            matches!(
-                resolver.resolve(file, &import.source),
+    let mut count = 0;
+
+    for module in modules.values() {
+        for import in &module.imports {
+            if !should_count_unresolved_import(import) {
+                continue;
+            }
+            if !resolution_cache.is_internal_specifier(&module.file, &import.source) {
+                continue;
+            }
+            if matches!(
+                resolution_cache.resolve(&module.file, &import.source),
                 Resolution::Unresolved
-            )
-        })
-        .count()
+            ) {
+                count += 1;
+            }
+        }
+    }
+
+    count
 }
 
 fn should_count_unresolved_import(import: &crate::parse::ImportFact) -> bool {
