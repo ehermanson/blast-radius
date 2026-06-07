@@ -65,6 +65,33 @@ fn setup_repo() -> tempfile::TempDir {
     dir
 }
 
+fn run_json(repo: &Path, args: &[&str]) -> Value {
+    let mut command = AssertCommand::cargo_bin("blast-radius").unwrap();
+    command
+        .current_dir(repo)
+        .args(["--repo-root", repo.to_str().unwrap(), "--format", "json"])
+        .args(args);
+
+    let output = command.assert().success().get_output().stdout.clone();
+    serde_json::from_slice(&output).unwrap()
+}
+
+fn node_labels(json: &Value) -> Vec<String> {
+    json["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|node| node["label"].as_str().map(ToOwned::to_owned))
+        .collect()
+}
+
+fn label_count(labels: &[String], expected: &str) -> usize {
+    labels
+        .iter()
+        .filter(|label| label.as_str() == expected)
+        .count()
+}
+
 #[test]
 fn export_mode_reports_transitive_blast_radius() {
     let repo = setup_repo();
@@ -127,6 +154,138 @@ fn export_mode_reports_transitive_blast_radius() {
     );
 
     assert_eq!(json["summary"]["unresolved_imports"].as_u64().unwrap(), 0);
+}
+
+#[test]
+fn export_mode_keeps_default_and_named_imports_separate() {
+    let repo = tempdir().unwrap();
+    fs::create_dir_all(repo.path().join("src")).unwrap();
+    fs::write(
+        repo.path().join("src/source.ts"),
+        "export default function DefaultThing() {}\nexport function namedThing() {}\n",
+    )
+    .unwrap();
+    fs::write(
+        repo.path().join("src/default-consumer.ts"),
+        "import DefaultThing from './source';\nexport const useDefault = () => DefaultThing();\n",
+    )
+    .unwrap();
+    fs::write(
+        repo.path().join("src/named-consumer.ts"),
+        "import { namedThing } from './source';\nexport const useNamed = () => namedThing();\n",
+    )
+    .unwrap();
+
+    let named = run_json(repo.path(), &["export", "src/source.ts", "namedThing"]);
+    let labels = node_labels(&named);
+    assert!(labels.iter().any(|label| label == "src/named-consumer.ts"));
+    assert!(
+        !labels
+            .iter()
+            .any(|label| label == "src/default-consumer.ts")
+    );
+
+    let default = run_json(repo.path(), &["export", "src/source.ts", "default"]);
+    let labels = node_labels(&default);
+    assert!(
+        labels
+            .iter()
+            .any(|label| label == "src/default-consumer.ts")
+    );
+    assert!(!labels.iter().any(|label| label == "src/named-consumer.ts"));
+}
+
+#[test]
+fn export_mode_tracks_namespace_member_usage() {
+    let repo = tempdir().unwrap();
+    fs::create_dir_all(repo.path().join("src")).unwrap();
+    fs::write(
+        repo.path().join("src/source.ts"),
+        "export function alpha() {}\nexport function beta() {}\n",
+    )
+    .unwrap();
+    fs::write(
+        repo.path().join("src/consumer.ts"),
+        "import * as source from './source';\nexport const useAlpha = () => source.alpha();\n",
+    )
+    .unwrap();
+
+    let alpha = run_json(repo.path(), &["export", "src/source.ts", "alpha"]);
+    assert!(
+        node_labels(&alpha)
+            .iter()
+            .any(|label| label == "src/consumer.ts")
+    );
+
+    let beta = run_json(repo.path(), &["export", "src/source.ts", "beta"]);
+    assert!(
+        !node_labels(&beta)
+            .iter()
+            .any(|label| label == "src/consumer.ts")
+    );
+}
+
+#[test]
+fn export_mode_follows_star_reexport_chains() {
+    let repo = tempdir().unwrap();
+    fs::create_dir_all(repo.path().join("src")).unwrap();
+    fs::write(
+        repo.path().join("src/source.ts"),
+        "export const target = 1;\n",
+    )
+    .unwrap();
+    fs::write(
+        repo.path().join("src/barrel-one.ts"),
+        "export * from './source';\n",
+    )
+    .unwrap();
+    fs::write(
+        repo.path().join("src/barrel-two.ts"),
+        "export * from './barrel-one';\n",
+    )
+    .unwrap();
+    fs::write(
+        repo.path().join("src/app.ts"),
+        "import { target } from './barrel-two';\nexport const value = target;\n",
+    )
+    .unwrap();
+
+    let json = run_json(repo.path(), &["export", "src/source.ts", "target"]);
+    let labels = node_labels(&json);
+    assert!(labels.iter().any(|label| label == "src/barrel-one.ts"));
+    assert!(labels.iter().any(|label| label == "src/barrel-two.ts"));
+    assert!(labels.iter().any(|label| label == "src/app.ts"));
+    assert_eq!(
+        json["edges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|edge| edge["kind"].as_str() == Some("reexports_star"))
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn files_mode_deduplicates_overlapping_multi_root_impact() {
+    let repo = tempdir().unwrap();
+    fs::create_dir_all(repo.path().join("src")).unwrap();
+    fs::write(repo.path().join("src/source-a.ts"), "export const a = 1;\n").unwrap();
+    fs::write(repo.path().join("src/source-b.ts"), "export const b = 2;\n").unwrap();
+    fs::write(
+        repo.path().join("src/app.ts"),
+        "import { a } from './source-a';\nimport { b } from './source-b';\nexport const value = a + b;\n",
+    )
+    .unwrap();
+
+    let json = run_json(
+        repo.path(),
+        &["files", "src/source-a.ts", "src/source-b.ts"],
+    );
+    let labels = node_labels(&json);
+    assert_eq!(label_count(&labels, "src/app.ts"), 1);
+    assert_eq!(json["roots"].as_array().unwrap().len(), 2);
+    assert_eq!(json["summary"]["total_affected_files"].as_u64().unwrap(), 3);
 }
 
 #[test]
