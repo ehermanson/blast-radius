@@ -7,9 +7,6 @@ use ignore::WalkBuilder;
 use jsonc_parser::{ParseOptions, parse_to_serde_value};
 use serde::Deserialize;
 
-const JAVASCRIPT_SOURCE_EXTENSIONS: &[&str] =
-    &["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"];
-
 #[derive(Debug, Clone)]
 pub struct RepoContext {
     pub repo_root: PathBuf,
@@ -124,77 +121,9 @@ fn load_tsconfig(path: &Path) -> Result<TsConfigPath> {
 }
 
 fn is_source_file(path: &Path) -> bool {
-    let Some(ext) = path.extension().and_then(|ext| ext.to_str()) else {
-        return false;
-    };
-
-    JAVASCRIPT_SOURCE_EXTENSIONS.contains(&ext)
-        || is_python_source_extension(ext)
-        || is_rust_source_extension(ext)
-        || is_vue_source_extension(ext)
-        || is_svelte_source_extension(ext)
-        || is_ruby_source_extension(ext)
-        || is_java_source_extension(ext)
-}
-
-#[cfg(feature = "python")]
-fn is_python_source_extension(ext: &str) -> bool {
-    ext == "py"
-}
-
-#[cfg(not(feature = "python"))]
-fn is_python_source_extension(_: &str) -> bool {
-    false
-}
-
-#[cfg(feature = "rust")]
-fn is_rust_source_extension(ext: &str) -> bool {
-    ext == "rs"
-}
-
-#[cfg(not(feature = "rust"))]
-fn is_rust_source_extension(_: &str) -> bool {
-    false
-}
-
-#[cfg(feature = "vue")]
-fn is_vue_source_extension(ext: &str) -> bool {
-    ext == "vue"
-}
-
-#[cfg(not(feature = "vue"))]
-fn is_vue_source_extension(_: &str) -> bool {
-    false
-}
-
-#[cfg(feature = "svelte")]
-fn is_svelte_source_extension(ext: &str) -> bool {
-    ext == "svelte"
-}
-
-#[cfg(not(feature = "svelte"))]
-fn is_svelte_source_extension(_: &str) -> bool {
-    false
-}
-
-#[cfg(feature = "ruby")]
-fn is_ruby_source_extension(ext: &str) -> bool {
-    ext == "rb"
-}
-
-#[cfg(not(feature = "ruby"))]
-fn is_ruby_source_extension(_: &str) -> bool {
-    false
-}
-
-#[cfg(feature = "java")]
-fn is_java_source_extension(ext: &str) -> bool {
-    ext == "java"
-}
-
-#[cfg(not(feature = "java"))]
-fn is_java_source_extension(_: &str) -> bool {
-    false
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(crate::language::is_source_extension)
 }
 
 #[cfg(test)]

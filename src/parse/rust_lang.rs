@@ -8,7 +8,7 @@ use super::{
     ReexportTarget,
 };
 
-pub(super) fn parse_rust_module(path: &Path, source: &str) -> Result<ModuleFacts> {
+pub(crate) fn parse_rust_module(path: &Path, source: &str) -> Result<ModuleFacts> {
     let file = rs_ast::parse_file(source)
         .with_context(|| format!("failed to parse rust module {}", path.display()))?;
     let mut facts = ModuleFacts::empty(path);

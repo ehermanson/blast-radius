@@ -5,7 +5,7 @@ use anyhow::Result;
 use super::javascript::{module_facts_from_javascript_module, parse_source};
 use super::{ExportFact, ExportKind, ModuleFacts};
 
-pub(super) fn parse_component_module(path: &Path, source: &str, kind: &str) -> Result<ModuleFacts> {
+pub(crate) fn parse_component_module(path: &Path, source: &str, kind: &str) -> Result<ModuleFacts> {
     let script = extract_component_scripts(source);
     let virtual_path = component_virtual_script_path(path, &script);
     let module = parse_source(&virtual_path, &script.source)?;

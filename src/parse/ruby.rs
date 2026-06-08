@@ -4,7 +4,7 @@ use anyhow::Result;
 
 use super::{ExportFact, ExportKind, ImportFact, ImportKind, ImportTarget, ModuleFacts};
 
-pub(super) fn parse_ruby_module(path: &Path, source: &str) -> Result<ModuleFacts> {
+pub(crate) fn parse_ruby_module(path: &Path, source: &str) -> Result<ModuleFacts> {
     let mut facts = ModuleFacts::empty(path);
 
     for line in source.lines() {

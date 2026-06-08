@@ -6,6 +6,11 @@ Cargo features, not runtime CLI flags.
 
 Current status:
 
+- Languages are implemented as `LanguageAdapter`s in the `language` module. Each
+  adapter declares its file extensions, parses source into the shared
+  `ModuleFacts`, and resolves its own imports against a shared `ResolveCtx`. A
+  single registry enumerates the compiled-in adapters; discovery (`fs`), parse
+  dispatch (`parse`), and import resolution (`resolve`) all derive from it.
 - JS/TS is enabled by default.
 - Vue exists behind `--features vue`.
 - Svelte exists behind `--features svelte`.
@@ -41,19 +46,17 @@ The analyzer should only depend on common facts:
 
 ## Phase 1: Split JS/TS Into An Adapter
 
-- Add a `language` module with a `LanguageAdapter` trait.
-- Move current JS/TS parsing behind `JavaScriptAdapter`.
-- Move JS/TS-specific file extension detection out of `fs.rs`.
-- Keep current `ModuleFacts` shape, but make it language-neutral enough for
-  Python.
-- Make repo discovery ask adapters which files they support.
-- Keep `analyze.rs` operating on normalized facts only.
+Done. The `language` module defines the `LanguageAdapter` trait and the registry
+that enumerates compiled-in adapters:
 
-Definition of done:
-
-- Existing JS/TS behavior is unchanged.
-- Chakra, Vite, and monorepo fixture tests still pass.
-- No Python code is parsed yet.
+- `JavaScriptAdapter` owns JS/TS parsing and resolution (and is the fallback for
+  any unclaimed extension).
+- File-extension detection lives in the adapters; `fs.rs` discovery asks the
+  registry via `language::is_source_extension`.
+- Per-language resolution dispatches through the registry against a shared
+  `ResolveCtx`; `analyze.rs` still operates on normalized facts only.
+- Existing JS/TS behavior is unchanged — Chakra, Vite, and monorepo fixture
+  tests still pass.
 
 ## Phase 2: Add Python Parser
 

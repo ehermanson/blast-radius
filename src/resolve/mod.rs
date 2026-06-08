@@ -1,55 +1,33 @@
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Component, Path, PathBuf};
-use std::sync::OnceLock;
 
 use anyhow::Result;
 
 use crate::fs::{RepoContext, TsConfigPath};
 
-mod javascript;
 mod package;
 use package::{PackageInfo, load_package_info};
-pub(super) use package::{package_specifier_parts, resolve_package_export};
+pub(crate) use package::{package_specifier_parts, resolve_package_export};
 
 #[cfg(test)]
 mod tests;
 
-#[cfg(feature = "python")]
-mod python;
-#[cfg(feature = "python")]
-use python::is_python_file;
-
-#[cfg(feature = "rust")]
-mod rust_lang;
-#[cfg(feature = "rust")]
-use rust_lang::is_rust_file;
-
-#[cfg(feature = "ruby")]
-mod ruby;
-#[cfg(feature = "ruby")]
-use ruby::is_ruby_file;
-
-#[cfg(feature = "java")]
-mod java;
-#[cfg(feature = "java")]
-use java::is_java_file;
-
-const JAVASCRIPT_RESOLUTION_EXTENSIONS: &[&str] =
-    &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"];
-
+/// Shared resolution state and primitives, borrowed by language adapters. Holds
+/// the source-file index, workspace packages, tsconfig aliases, and the
+/// language-specific suffix/package indexes used by Ruby and Java.
 #[derive(Debug, Clone)]
-pub struct Resolver {
-    repo_root: PathBuf,
-    source_files: HashSet<PathBuf>,
+pub struct ResolveCtx {
+    pub(crate) repo_root: PathBuf,
+    pub(crate) source_files: HashSet<PathBuf>,
     #[cfg(any(feature = "ruby", feature = "java"))]
-    suffix_index: BTreeMap<PathBuf, PathBuf>,
+    pub(crate) suffix_index: BTreeMap<PathBuf, PathBuf>,
     #[cfg(any(feature = "ruby", feature = "java"))]
     suffix_ambiguities: Vec<SuffixAmbiguity>,
     #[cfg(feature = "java")]
-    java_package_index: BTreeMap<PathBuf, Vec<PathBuf>>,
-    packages: Vec<PackageInfo>,
-    package_by_name: BTreeMap<String, usize>,
-    tsconfigs: Vec<TsConfigPath>,
+    pub(crate) java_package_index: BTreeMap<PathBuf, Vec<PathBuf>>,
+    pub(crate) packages: Vec<PackageInfo>,
+    pub(crate) package_by_name: BTreeMap<String, usize>,
+    pub(crate) tsconfigs: Vec<TsConfigPath>,
 }
 
 #[derive(Debug, Clone)]
@@ -72,8 +50,8 @@ struct SuffixIndex {
     ambiguities: Vec<SuffixAmbiguity>,
 }
 
-impl Resolver {
-    pub fn new(context: &RepoContext) -> Result<Self> {
+impl ResolveCtx {
+    fn new(context: &RepoContext) -> Result<Self> {
         let mut packages = Vec::new();
         for package_json in &context.package_jsons {
             if let Some(package) = load_package_info(package_json)? {
@@ -102,70 +80,6 @@ impl Resolver {
         })
     }
 
-    pub fn warnings(&self) -> Vec<String> {
-        #[cfg(any(feature = "ruby", feature = "java"))]
-        {
-            let mut warnings = Vec::new();
-            for ambiguity in &self.suffix_ambiguities {
-                let paths = ambiguity
-                    .paths
-                    .iter()
-                    .map(|path| path.strip_prefix(&self.repo_root).unwrap_or(path))
-                    .map(|path| path.display().to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                warnings.push(format!(
-                    "ambiguous suffix resolution for {} matched multiple files: {paths}",
-                    ambiguity.suffix.display()
-                ));
-            }
-            warnings
-        }
-
-        #[cfg(not(any(feature = "ruby", feature = "java")))]
-        {
-            Vec::new()
-        }
-    }
-
-    pub fn resolve(&self, importer: &Path, specifier: &str) -> Resolution {
-        let importer = self.normalize_importer(importer);
-
-        #[cfg(feature = "python")]
-        if is_python_file(&importer) {
-            if let Some(path) = self.resolve_python_import(&importer, specifier) {
-                return Resolution::Resolved(path);
-            }
-            return Resolution::Unresolved;
-        }
-
-        #[cfg(feature = "rust")]
-        if is_rust_file(&importer) {
-            if let Some(path) = self.resolve_rust_import(&importer, specifier) {
-                return Resolution::Resolved(path);
-            }
-            return Resolution::Unresolved;
-        }
-
-        #[cfg(feature = "ruby")]
-        if is_ruby_file(&importer) {
-            if let Some(path) = self.resolve_ruby_import(&importer, specifier) {
-                return Resolution::Resolved(path);
-            }
-            return Resolution::Unresolved;
-        }
-
-        #[cfg(feature = "java")]
-        if is_java_file(&importer) {
-            if let Some(path) = self.resolve_java_import(specifier) {
-                return Resolution::Resolved(path);
-            }
-            return Resolution::Unresolved;
-        }
-
-        self.resolve_javascript_import(&importer, specifier)
-    }
-
     fn normalize_importer(&self, importer: &Path) -> PathBuf {
         let cleaned = clean_path(importer);
         if self.source_files.contains(&cleaned) {
@@ -175,42 +89,9 @@ impl Resolver {
         importer.canonicalize().unwrap_or(cleaned)
     }
 
-    pub fn is_internal_specifier(&self, importer: &Path, specifier: &str) -> bool {
-        #[cfg(feature = "python")]
-        if is_python_file(importer) {
-            if specifier.starts_with('.') {
-                return true;
-            }
-            return self.python_top_level_exists(specifier);
-        }
-
-        #[cfg(feature = "rust")]
-        if is_rust_file(importer) {
-            if specifier.starts_with("mod:")
-                || specifier.starts_with("crate::")
-                || specifier.starts_with("self::")
-                || specifier.starts_with("super::")
-            {
-                return true;
-            }
-            return self.rust_top_level_exists(specifier);
-        }
-
-        #[cfg(feature = "ruby")]
-        if is_ruby_file(importer) {
-            return specifier.starts_with('.')
-                || self.resolve_ruby_import(importer, specifier).is_some();
-        }
-
-        #[cfg(feature = "java")]
-        if is_java_file(importer) {
-            return self.resolve_java_import(specifier).is_some();
-        }
-
-        self.is_internal_javascript_specifier(importer, specifier)
-    }
-
-    pub(super) fn resolve_path(&self, base: &Path, specifier: &str) -> Resolution {
+    /// Resolve a relative or absolute path specifier against `base`, probing the
+    /// known source extensions. Shared by every language adapter.
+    pub(crate) fn resolve_path(&self, base: &Path, specifier: &str) -> Resolution {
         let path = if specifier.starts_with('/') {
             clean_path(&self.repo_root.join(specifier.trim_start_matches('/')))
         } else {
@@ -222,14 +103,16 @@ impl Resolver {
             .unwrap_or(Resolution::Unresolved)
     }
 
-    pub(super) fn try_resolve_candidate(&self, candidate: &Path) -> Option<PathBuf> {
+    /// Map a path candidate to a concrete source file, trying exact match, then
+    /// known extensions, then `index.*` / `__init__.py` directory entrypoints.
+    pub(crate) fn try_resolve_candidate(&self, candidate: &Path) -> Option<PathBuf> {
         let candidate = clean_path(candidate);
 
         if self.source_files.contains(&candidate) {
             return Some(candidate);
         }
 
-        for extension in resolution_extensions() {
+        for extension in crate::language::resolution_extensions() {
             let path = candidate.with_extension(extension);
             if self.source_files.contains(&path) {
                 return Some(path);
@@ -237,9 +120,9 @@ impl Resolver {
         }
 
         if let Some(ext) = candidate.extension().and_then(|ext| ext.to_str())
-            && !resolution_extensions().contains(&ext)
+            && !crate::language::resolution_extensions().contains(&ext)
         {
-            for extension in resolution_extensions() {
+            for extension in crate::language::resolution_extensions() {
                 let path = candidate.with_extension(format!("{ext}.{extension}"));
                 if self.source_files.contains(&path) {
                     return Some(path);
@@ -248,7 +131,7 @@ impl Resolver {
         }
 
         if candidate.extension().is_none() {
-            for extension in resolution_extensions() {
+            for extension in crate::language::resolution_extensions() {
                 let path = candidate.join(format!("index.{extension}"));
                 if self.source_files.contains(&path) {
                     return Some(path);
@@ -268,30 +151,54 @@ impl Resolver {
     }
 }
 
-fn resolution_extensions() -> &'static [&'static str] {
-    static EXTENSIONS: OnceLock<Vec<&'static str>> = OnceLock::new();
-    EXTENSIONS.get_or_init(|| {
-        let mut extensions = JAVASCRIPT_RESOLUTION_EXTENSIONS.to_vec();
-        if cfg!(feature = "python") {
-            extensions.push("py");
+/// Resolves import specifiers to repo source files by dispatching to the
+/// language adapter that owns the importing file.
+#[derive(Debug, Clone)]
+pub struct Resolver {
+    ctx: ResolveCtx,
+}
+
+impl Resolver {
+    pub fn new(context: &RepoContext) -> Result<Self> {
+        Ok(Self {
+            ctx: ResolveCtx::new(context)?,
+        })
+    }
+
+    pub fn warnings(&self) -> Vec<String> {
+        #[cfg(any(feature = "ruby", feature = "java"))]
+        {
+            let mut warnings = Vec::new();
+            for ambiguity in &self.ctx.suffix_ambiguities {
+                let paths = ambiguity
+                    .paths
+                    .iter()
+                    .map(|path| path.strip_prefix(&self.ctx.repo_root).unwrap_or(path))
+                    .map(|path| path.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                warnings.push(format!(
+                    "ambiguous suffix resolution for {} matched multiple files: {paths}",
+                    ambiguity.suffix.display()
+                ));
+            }
+            warnings
         }
-        if cfg!(feature = "rust") {
-            extensions.push("rs");
+
+        #[cfg(not(any(feature = "ruby", feature = "java")))]
+        {
+            Vec::new()
         }
-        if cfg!(feature = "vue") {
-            extensions.push("vue");
-        }
-        if cfg!(feature = "svelte") {
-            extensions.push("svelte");
-        }
-        if cfg!(feature = "ruby") {
-            extensions.push("rb");
-        }
-        if cfg!(feature = "java") {
-            extensions.push("java");
-        }
-        extensions
-    })
+    }
+
+    pub fn resolve(&self, importer: &Path, specifier: &str) -> Resolution {
+        let importer = self.ctx.normalize_importer(importer);
+        crate::language::adapter_for(&importer).resolve(&self.ctx, &importer, specifier)
+    }
+
+    pub fn is_internal_specifier(&self, importer: &Path, specifier: &str) -> bool {
+        crate::language::adapter_for(importer).is_internal(&self.ctx, importer, specifier)
+    }
 }
 
 #[cfg(any(feature = "ruby", feature = "java"))]
@@ -365,7 +272,7 @@ fn path_suffixes(path: &Path) -> Vec<PathBuf> {
     suffixes
 }
 
-pub(super) fn match_alias(pattern: &str, specifier: &str) -> Option<Vec<String>> {
+pub(crate) fn match_alias(pattern: &str, specifier: &str) -> Option<Vec<String>> {
     if let Some((prefix, suffix)) = pattern.split_once('*') {
         if specifier.starts_with(prefix) && specifier.ends_with(suffix) {
             let middle = &specifier[prefix.len()..specifier.len() - suffix.len()];
@@ -381,7 +288,7 @@ pub(super) fn match_alias(pattern: &str, specifier: &str) -> Option<Vec<String>>
     }
 }
 
-pub(super) fn apply_alias_target(target: &str, captures: &[String]) -> String {
+pub(crate) fn apply_alias_target(target: &str, captures: &[String]) -> String {
     let mut resolved = target.to_string();
     for capture in captures {
         if let Some(index) = resolved.find('*') {
@@ -391,7 +298,7 @@ pub(super) fn apply_alias_target(target: &str, captures: &[String]) -> String {
     resolved
 }
 
-fn clean_path(path: &Path) -> PathBuf {
+pub(crate) fn clean_path(path: &Path) -> PathBuf {
     let mut result = PathBuf::new();
 
     for component in path.components() {

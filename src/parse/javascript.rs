@@ -12,7 +12,7 @@ use super::*;
 mod usage;
 use usage::UsageCollector;
 
-pub(super) fn parse_javascript_module(path: &Path, source: &str) -> Result<ModuleFacts> {
+pub(crate) fn parse_javascript_module(path: &Path, source: &str) -> Result<ModuleFacts> {
     let module = parse_source(path, source)?;
     module_facts_from_javascript_module(path, &module)
 }

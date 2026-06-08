@@ -10,8 +10,8 @@ use super::{apply_alias_target, match_alias};
 #[derive(Debug, Clone)]
 pub(crate) struct PackageInfo {
     pub(super) name: String,
-    pub(super) root: PathBuf,
-    pub(super) entry_candidates: Vec<PathBuf>,
+    pub(crate) root: PathBuf,
+    pub(crate) entry_candidates: Vec<PathBuf>,
     export_mappings: Vec<ExportMapping>,
 }
 

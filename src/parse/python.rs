@@ -8,7 +8,7 @@ use super::{
     ReexportTarget,
 };
 
-pub(super) fn parse_python_module(path: &Path, source: &str) -> Result<ModuleFacts> {
+pub(crate) fn parse_python_module(path: &Path, source: &str) -> Result<ModuleFacts> {
     let suite = py_ast::Suite::parse(source, &path.display().to_string()).map_err(|error| {
         anyhow::anyhow!("failed to parse python module {}: {error}", path.display())
     })?;

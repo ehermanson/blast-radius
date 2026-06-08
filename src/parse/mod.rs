@@ -6,68 +6,38 @@ mod facts;
 pub use facts::*;
 
 mod javascript;
-use javascript::parse_javascript_module;
+pub(crate) use javascript::parse_javascript_module;
 
 #[cfg(any(feature = "vue", feature = "svelte"))]
 mod component;
 #[cfg(any(feature = "vue", feature = "svelte"))]
-use component::parse_component_module;
+pub(crate) use component::parse_component_module;
 
 #[cfg(feature = "java")]
 mod java;
 #[cfg(feature = "java")]
-use java::parse_java_module;
+pub(crate) use java::parse_java_module;
 
 #[cfg(feature = "ruby")]
 mod ruby;
 #[cfg(feature = "ruby")]
-use ruby::parse_ruby_module;
+pub(crate) use ruby::parse_ruby_module;
 
 #[cfg(feature = "python")]
 mod python;
 #[cfg(feature = "python")]
-use python::parse_python_module;
+pub(crate) use python::parse_python_module;
 
 #[cfg(feature = "rust")]
 mod rust_lang;
 #[cfg(feature = "rust")]
-use rust_lang::parse_rust_module;
+pub(crate) use rust_lang::parse_rust_module;
 
 pub fn parse_module(path: &Path) -> Result<ModuleFacts> {
     let source = fs::read_to_string(path)
         .with_context(|| format!("failed to read source file {}", path.display()))?;
 
-    #[cfg(feature = "python")]
-    if path.extension().and_then(|ext| ext.to_str()) == Some("py") {
-        return parse_python_module(path, &source);
-    }
-
-    #[cfg(feature = "rust")]
-    if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
-        return parse_rust_module(path, &source);
-    }
-
-    #[cfg(feature = "vue")]
-    if path.extension().and_then(|ext| ext.to_str()) == Some("vue") {
-        return parse_component_module(path, &source, "vue");
-    }
-
-    #[cfg(feature = "svelte")]
-    if path.extension().and_then(|ext| ext.to_str()) == Some("svelte") {
-        return parse_component_module(path, &source, "svelte");
-    }
-
-    #[cfg(feature = "ruby")]
-    if path.extension().and_then(|ext| ext.to_str()) == Some("rb") {
-        return parse_ruby_module(path, &source);
-    }
-
-    #[cfg(feature = "java")]
-    if path.extension().and_then(|ext| ext.to_str()) == Some("java") {
-        return parse_java_module(path, &source);
-    }
-
-    parse_javascript_module(path, &source)
+    crate::language::adapter_for(path).parse(path, &source)
 }
 
 #[cfg(test)]

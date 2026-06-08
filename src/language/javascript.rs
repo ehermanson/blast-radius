@@ -1,0 +1,155 @@
+use std::path::{Path, PathBuf};
+
+use anyhow::Result;
+
+use crate::fs::TsConfigPath;
+use crate::parse::{ModuleFacts, parse_javascript_module};
+use crate::resolve::{
+    ResolveCtx, Resolution, apply_alias_target, clean_path, match_alias, package_specifier_parts,
+    resolve_package_export,
+};
+
+use super::LanguageAdapter;
+
+pub(super) struct JavaScriptAdapter;
+
+const EXTENSIONS: &[&str] = &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"];
+
+impl LanguageAdapter for JavaScriptAdapter {
+    fn extensions(&self) -> &'static [&'static str] {
+        EXTENSIONS
+    }
+
+    fn parse(&self, path: &Path, source: &str) -> Result<ModuleFacts> {
+        parse_javascript_module(path, source)
+    }
+
+    fn resolve(&self, ctx: &ResolveCtx, importer: &Path, specifier: &str) -> Resolution {
+        resolve_javascript_import(ctx, importer, specifier)
+    }
+
+    fn is_internal(&self, ctx: &ResolveCtx, importer: &Path, specifier: &str) -> bool {
+        is_internal_javascript_specifier(ctx, importer, specifier)
+    }
+}
+
+// Shared with the Vue/Svelte component adapters, which resolve through JS rules.
+pub(super) fn resolve_javascript_import(
+    ctx: &ResolveCtx,
+    importer: &Path,
+    specifier: &str,
+) -> Resolution {
+    if specifier.starts_with('.') || specifier.starts_with('/') {
+        return ctx.resolve_path(importer.parent().unwrap_or(&ctx.repo_root), specifier);
+    }
+
+    if let Some(path) = resolve_tsconfig_alias(ctx, importer, specifier) {
+        return Resolution::Resolved(path);
+    }
+
+    if let Some(path) = resolve_workspace_package(ctx, specifier) {
+        return Resolution::Resolved(path);
+    }
+
+    Resolution::Unresolved
+}
+
+pub(super) fn is_internal_javascript_specifier(
+    ctx: &ResolveCtx,
+    importer: &Path,
+    specifier: &str,
+) -> bool {
+    if specifier.starts_with('.') || specifier.starts_with('/') {
+        return true;
+    }
+
+    if let Some(tsconfig) = nearest_tsconfig(ctx, importer)
+        && tsconfig
+            .compiler_options
+            .paths
+            .keys()
+            .any(|pattern| match_alias(pattern, specifier).is_some())
+    {
+        return true;
+    }
+
+    package_specifier_parts(specifier)
+        .map(|(package_name, _)| ctx.package_by_name.contains_key(package_name))
+        .unwrap_or(false)
+}
+
+fn resolve_tsconfig_alias(ctx: &ResolveCtx, importer: &Path, specifier: &str) -> Option<PathBuf> {
+    let tsconfig = nearest_tsconfig(ctx, importer)?;
+    let tsconfig_dir = tsconfig.path.parent()?;
+    let base_dir = tsconfig
+        .compiler_options
+        .base_url
+        .as_ref()
+        .map(|base| clean_path(&tsconfig_dir.join(base)))
+        .unwrap_or_else(|| tsconfig_dir.to_path_buf());
+
+    for (pattern, targets) in &tsconfig.compiler_options.paths {
+        let Some(captures) = match_alias(pattern, specifier) else {
+            continue;
+        };
+
+        for target in targets {
+            let candidate = apply_alias_target(target, &captures);
+            if let Resolution::Resolved(resolved) = ctx.resolve_path(&base_dir, &candidate) {
+                return Some(resolved);
+            }
+        }
+    }
+
+    None
+}
+
+fn nearest_tsconfig<'a>(ctx: &'a ResolveCtx, importer: &Path) -> Option<&'a TsConfigPath> {
+    ctx.tsconfigs
+        .iter()
+        .filter(|config| importer.starts_with(config.path.parent().unwrap_or(&ctx.repo_root)))
+        .max_by_key(|config| config.path.components().count())
+}
+
+fn resolve_workspace_package(ctx: &ResolveCtx, specifier: &str) -> Option<PathBuf> {
+    let (package_name, rest) = package_specifier_parts(specifier)?;
+    let package = ctx
+        .package_by_name
+        .get(package_name)
+        .and_then(|index| ctx.packages.get(*index))?;
+
+    if let Some(rest) = rest {
+        let export_key = format!("./{rest}");
+        if let Some(resolved) = resolve_package_export(package, &export_key)
+            .and_then(|path| ctx.try_resolve_candidate(&path))
+        {
+            return Some(resolved);
+        }
+
+        let direct = package.root.join(rest);
+        if let Some(resolved) = ctx.try_resolve_candidate(&direct) {
+            return Some(resolved);
+        }
+
+        let src_direct = package.root.join("src").join(rest);
+        if let Some(resolved) = ctx.try_resolve_candidate(&src_direct) {
+            return Some(resolved);
+        }
+
+        return None;
+    }
+
+    if let Some(resolved) =
+        resolve_package_export(package, ".").and_then(|path| ctx.try_resolve_candidate(&path))
+    {
+        return Some(resolved);
+    }
+
+    for candidate in &package.entry_candidates {
+        if let Some(resolved) = ctx.try_resolve_candidate(candidate) {
+            return Some(resolved);
+        }
+    }
+
+    None
+}
