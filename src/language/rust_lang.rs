@@ -25,7 +25,7 @@ impl LanguageAdapter for RustAdapter {
         }
     }
 
-    fn is_internal(&self, ctx: &ResolveCtx, _importer: &Path, specifier: &str) -> bool {
+    fn is_internal(&self, ctx: &ResolveCtx, importer: &Path, specifier: &str) -> bool {
         if specifier.starts_with("mod:")
             || specifier.starts_with("crate::")
             || specifier.starts_with("self::")
@@ -33,7 +33,7 @@ impl LanguageAdapter for RustAdapter {
         {
             return true;
         }
-        rust_top_level_exists(ctx, specifier)
+        rust_top_level_exists(ctx, importer, specifier)
     }
 }
 
@@ -50,7 +50,7 @@ fn resolve_rust_import(ctx: &ResolveCtx, importer: &Path, specifier: &str) -> Op
     let (head, rest) = parts.split_first()?;
 
     match *head {
-        "crate" => resolve_rust_from_crate_roots(ctx, rest),
+        "crate" => resolve_rust_from_crate_roots(ctx, importer, rest),
         "self" => {
             let base = rust_child_module_base(importer).join(rest.join("/"));
             try_resolve_rust_module_candidate(ctx, &base)
@@ -67,7 +67,7 @@ fn resolve_rust_import(ctx: &ResolveCtx, importer: &Path, specifier: &str) -> Op
             try_resolve_rust_module_candidate(ctx, &base)
         }
         _ => {
-            if let Some(path) = resolve_rust_from_crate_roots(ctx, &parts) {
+            if let Some(path) = resolve_rust_from_crate_roots(ctx, importer, &parts) {
                 return Some(path);
             }
             let base = rust_child_module_base(importer).join(parts.join("/"));
@@ -76,18 +76,40 @@ fn resolve_rust_import(ctx: &ResolveCtx, importer: &Path, specifier: &str) -> Op
     }
 }
 
-fn resolve_rust_from_crate_roots(ctx: &ResolveCtx, parts: &[&str]) -> Option<PathBuf> {
+/// Resolve a path rooted at a crate root. `crate::` paths are anchored to the
+/// importer's own crate (its nearest enclosing `lib.rs`/`main.rs` directory) so
+/// that, in a multi-crate workspace, `crate::models` from crate B does not
+/// resolve into crate A's identically-named module.
+fn resolve_rust_from_crate_roots(
+    ctx: &ResolveCtx,
+    importer: &Path,
+    parts: &[&str],
+) -> Option<PathBuf> {
     if parts.is_empty() {
         return None;
     }
 
-    for root in rust_crate_roots(ctx) {
+    for root in crate_roots_for(ctx, importer) {
         let candidate = root.join(parts.join("/"));
         if let Some(path) = try_resolve_rust_module_candidate(ctx, &candidate) {
             return Some(path);
         }
     }
     None
+}
+
+/// The crate roots to resolve against for an import in `importer`: the nearest
+/// enclosing crate root if one exists, otherwise every crate root as a fallback.
+fn crate_roots_for(ctx: &ResolveCtx, importer: &Path) -> Vec<PathBuf> {
+    let roots = rust_crate_roots(ctx);
+    match roots
+        .iter()
+        .filter(|root| importer.starts_with(root))
+        .max_by_key(|root| root.components().count())
+    {
+        Some(enclosing) => vec![enclosing.clone()],
+        None => roots,
+    }
 }
 
 fn rust_crate_roots(ctx: &ResolveCtx) -> Vec<PathBuf> {
@@ -111,7 +133,7 @@ fn rust_crate_roots(ctx: &ResolveCtx) -> Vec<PathBuf> {
 }
 
 fn try_resolve_rust_module_candidate(ctx: &ResolveCtx, candidate: &Path) -> Option<PathBuf> {
-    if let Some(path) = ctx.try_resolve_candidate(candidate) {
+    if let Some(path) = ctx.try_resolve_candidate(candidate, &["rs"]) {
         return Some(path);
     }
 
@@ -123,7 +145,7 @@ fn try_resolve_rust_module_candidate(ctx: &ResolveCtx, candidate: &Path) -> Opti
     None
 }
 
-fn rust_top_level_exists(ctx: &ResolveCtx, specifier: &str) -> bool {
+fn rust_top_level_exists(ctx: &ResolveCtx, importer: &Path, specifier: &str) -> bool {
     let Some(first) = specifier.split("::").next() else {
         return false;
     };
@@ -131,7 +153,7 @@ fn rust_top_level_exists(ctx: &ResolveCtx, specifier: &str) -> bool {
         return false;
     }
 
-    rust_crate_roots(ctx)
+    crate_roots_for(ctx, importer)
         .into_iter()
         .any(|root| try_resolve_rust_module_candidate(ctx, &root.join(first)).is_some())
 }

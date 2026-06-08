@@ -219,6 +219,75 @@ fn resolves_python_absolute_relative_and_package_imports() {
     assert!(!resolver.is_internal_specifier(&importer, "dataclasses"));
 }
 
+#[cfg(feature = "python")]
+#[test]
+fn python_import_does_not_resolve_to_javascript_file() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("app")).unwrap();
+    fs::write(dir.path().join("app/__init__.py"), "").unwrap();
+    fs::write(dir.path().join("app/models.py"), "class User: pass").unwrap();
+    // A same-named JS/TS file must not satisfy a Python import: resolution is
+    // scoped to the importer's language family.
+    fs::write(dir.path().join("app/models.ts"), "export const User = 1;").unwrap();
+    fs::write(dir.path().join("app/main.py"), "from app import models").unwrap();
+
+    let context = RepoContext::discover(dir.path()).unwrap();
+    let resolver = Resolver::new(&context).unwrap();
+    let importer = dir.path().join("app/main.py");
+
+    assert!(matches!(
+        resolver.resolve(&importer, "app.models"),
+        Resolution::Resolved(path) if path.ends_with("app/models.py")
+    ));
+}
+
+#[cfg(feature = "python")]
+#[test]
+fn resolves_python_src_layout_package_imports() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("src/my_pkg")).unwrap();
+    fs::write(dir.path().join("src/my_pkg/__init__.py"), "").unwrap();
+    fs::write(dir.path().join("src/my_pkg/models.py"), "class User: pass").unwrap();
+    fs::write(dir.path().join("src/my_pkg/main.py"), "import my_pkg.models").unwrap();
+
+    let context = RepoContext::discover(dir.path()).unwrap();
+    let resolver = Resolver::new(&context).unwrap();
+    let importer = dir.path().join("src/my_pkg/main.py");
+
+    assert!(matches!(
+        resolver.resolve(&importer, "my_pkg.models"),
+        Resolution::Resolved(path) if path.ends_with("src/my_pkg/models.py")
+    ));
+    assert!(resolver.is_internal_specifier(&importer, "my_pkg.models"));
+}
+
+#[cfg(feature = "rust")]
+#[test]
+fn rust_crate_import_resolves_within_importers_crate() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("crates/a/src")).unwrap();
+    fs::create_dir_all(dir.path().join("crates/b/src")).unwrap();
+    fs::write(dir.path().join("crates/a/src/lib.rs"), "pub mod models;").unwrap();
+    fs::write(dir.path().join("crates/a/src/models.rs"), "pub struct A;").unwrap();
+    fs::write(
+        dir.path().join("crates/b/src/lib.rs"),
+        "pub mod models;\nuse crate::models::B;",
+    )
+    .unwrap();
+    fs::write(dir.path().join("crates/b/src/models.rs"), "pub struct B;").unwrap();
+
+    let context = RepoContext::discover(dir.path()).unwrap();
+    let resolver = Resolver::new(&context).unwrap();
+    let b_lib = dir.path().join("crates/b/src/lib.rs");
+
+    // `crate::models` from crate B must hit B's module, not crate A's
+    // identically-named one (which sorts first among crate roots).
+    assert!(matches!(
+        resolver.resolve(&b_lib, "crate::models"),
+        Resolution::Resolved(path) if path.ends_with("crates/b/src/models.rs")
+    ));
+}
+
 #[cfg(feature = "rust")]
 #[test]
 fn resolves_rust_crate_super_self_and_mod_imports() {

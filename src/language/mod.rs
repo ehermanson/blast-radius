@@ -102,9 +102,12 @@ pub(crate) fn adapter_for(path: &Path) -> &'static dyn LanguageAdapter {
         .as_ref()
 }
 
-/// All source extensions across the compiled-in adapters, in resolution-
-/// preference order. Used for extension probing during resolution.
-pub(crate) fn resolution_extensions() -> &'static [&'static str] {
+/// Every source extension across the compiled-in adapters. Used by repo
+/// discovery to decide which files to index. Note this is the union across all
+/// languages; per-language resolution only probes its own family's extensions
+/// (see each adapter's resolution logic) so a Python import never resolves to a
+/// `.ts` file, and vice versa.
+fn source_extensions() -> &'static [&'static str] {
     static EXTENSIONS: OnceLock<Vec<&'static str>> = OnceLock::new();
     EXTENSIONS.get_or_init(|| {
         registry()
@@ -116,5 +119,5 @@ pub(crate) fn resolution_extensions() -> &'static [&'static str] {
 
 /// Whether `ext` belongs to any compiled-in language (used by repo discovery).
 pub(crate) fn is_source_extension(ext: &str) -> bool {
-    resolution_extensions().contains(&ext)
+    source_extensions().contains(&ext)
 }

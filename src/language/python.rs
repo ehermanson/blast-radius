@@ -33,13 +33,23 @@ impl LanguageAdapter for PythonAdapter {
     }
 }
 
+/// Absolute Python imports are resolved against the repo root and a `src/`
+/// layout root, covering both flat and `src/my_pkg/...` project shapes.
+const PYTHON_SOURCE_ROOTS: &[&str] = &["", "src"];
+
 fn resolve_python_import(ctx: &ResolveCtx, importer: &Path, specifier: &str) -> Option<PathBuf> {
     if specifier.starts_with('.') {
         return resolve_python_relative_import(ctx, importer, specifier);
     }
 
-    let candidate = ctx.repo_root.join(specifier.replace('.', "/"));
-    try_resolve_python_module_candidate(ctx, &candidate)
+    let module_path = specifier.replace('.', "/");
+    for root in PYTHON_SOURCE_ROOTS {
+        let candidate = ctx.repo_root.join(root).join(&module_path);
+        if let Some(path) = try_resolve_python_module_candidate(ctx, &candidate) {
+            return Some(path);
+        }
+    }
+    None
 }
 
 fn resolve_python_relative_import(
@@ -64,7 +74,7 @@ fn resolve_python_relative_import(
 }
 
 fn try_resolve_python_module_candidate(ctx: &ResolveCtx, candidate: &Path) -> Option<PathBuf> {
-    if let Some(path) = ctx.try_resolve_candidate(candidate) {
+    if let Some(path) = ctx.try_resolve_candidate(candidate, &["py"]) {
         return Some(path);
     }
 
@@ -84,7 +94,10 @@ fn python_top_level_exists(ctx: &ResolveCtx, specifier: &str) -> bool {
         return false;
     }
 
-    let module_file = clean_path(&ctx.repo_root.join(format!("{first}.py")));
-    let package_init = clean_path(&ctx.repo_root.join(first).join("__init__.py"));
-    ctx.source_files.contains(&module_file) || ctx.source_files.contains(&package_init)
+    PYTHON_SOURCE_ROOTS.iter().any(|root| {
+        let base = ctx.repo_root.join(root);
+        let module_file = clean_path(&base.join(format!("{first}.py")));
+        let package_init = clean_path(&base.join(first).join("__init__.py"));
+        ctx.source_files.contains(&module_file) || ctx.source_files.contains(&package_init)
+    })
 }

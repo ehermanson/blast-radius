@@ -90,29 +90,42 @@ impl ResolveCtx {
     }
 
     /// Resolve a relative or absolute path specifier against `base`, probing the
-    /// known source extensions. Shared by every language adapter.
-    pub(crate) fn resolve_path(&self, base: &Path, specifier: &str) -> Resolution {
+    /// given `extensions`. The caller passes only its own language family's
+    /// extensions so resolution never crosses language boundaries.
+    pub(crate) fn resolve_path(
+        &self,
+        base: &Path,
+        specifier: &str,
+        extensions: &[&str],
+    ) -> Resolution {
         let path = if specifier.starts_with('/') {
             clean_path(&self.repo_root.join(specifier.trim_start_matches('/')))
         } else {
             clean_path(&base.join(specifier))
         };
 
-        self.try_resolve_candidate(&path)
+        self.try_resolve_candidate(&path, extensions)
             .map(Resolution::Resolved)
             .unwrap_or(Resolution::Unresolved)
     }
 
     /// Map a path candidate to a concrete source file, trying exact match, then
-    /// known extensions, then `index.*` / `__init__.py` directory entrypoints.
-    pub(crate) fn try_resolve_candidate(&self, candidate: &Path) -> Option<PathBuf> {
+    /// the given `extensions`, then `index.*` directory entrypoints. Probing is
+    /// scoped to the caller's extensions, so e.g. a JS import cannot resolve to
+    /// a `.py` file. Language-specific directory entrypoints (Python's
+    /// `__init__.py`) are handled by the owning adapter.
+    pub(crate) fn try_resolve_candidate(
+        &self,
+        candidate: &Path,
+        extensions: &[&str],
+    ) -> Option<PathBuf> {
         let candidate = clean_path(candidate);
 
         if self.source_files.contains(&candidate) {
             return Some(candidate);
         }
 
-        for extension in crate::language::resolution_extensions() {
+        for extension in extensions {
             let path = candidate.with_extension(extension);
             if self.source_files.contains(&path) {
                 return Some(path);
@@ -120,9 +133,9 @@ impl ResolveCtx {
         }
 
         if let Some(ext) = candidate.extension().and_then(|ext| ext.to_str())
-            && !crate::language::resolution_extensions().contains(&ext)
+            && !extensions.contains(&ext)
         {
-            for extension in crate::language::resolution_extensions() {
+            for extension in extensions {
                 let path = candidate.with_extension(format!("{ext}.{extension}"));
                 if self.source_files.contains(&path) {
                     return Some(path);
@@ -131,16 +144,8 @@ impl ResolveCtx {
         }
 
         if candidate.extension().is_none() {
-            for extension in crate::language::resolution_extensions() {
+            for extension in extensions {
                 let path = candidate.join(format!("index.{extension}"));
-                if self.source_files.contains(&path) {
-                    return Some(path);
-                }
-            }
-
-            #[cfg(feature = "python")]
-            {
-                let path = candidate.join("__init__.py");
                 if self.source_files.contains(&path) {
                     return Some(path);
                 }
@@ -197,7 +202,8 @@ impl Resolver {
     }
 
     pub fn is_internal_specifier(&self, importer: &Path, specifier: &str) -> bool {
-        crate::language::adapter_for(importer).is_internal(&self.ctx, importer, specifier)
+        let importer = self.ctx.normalize_importer(importer);
+        crate::language::adapter_for(&importer).is_internal(&self.ctx, &importer, specifier)
     }
 }
 

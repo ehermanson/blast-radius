@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use anyhow::Result;
 
@@ -14,6 +15,23 @@ use super::LanguageAdapter;
 pub(super) struct JavaScriptAdapter;
 
 const EXTENSIONS: &[&str] = &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"];
+
+/// Extensions JS/TS resolution may resolve to. This is the web family: JS/TS
+/// plus Vue/Svelte components when those features are enabled, since `.ts` files
+/// import components and components import `.ts` (and each other). It does not
+/// include non-web languages, so a JS import never resolves to a `.py`/`.rb`/etc.
+pub(super) fn web_extensions() -> &'static [&'static str] {
+    static EXTENSIONS_ONCE: OnceLock<Vec<&'static str>> = OnceLock::new();
+    EXTENSIONS_ONCE.get_or_init(|| {
+        #[allow(unused_mut)]
+        let mut extensions: Vec<&'static str> = EXTENSIONS.to_vec();
+        #[cfg(feature = "vue")]
+        extensions.push("vue");
+        #[cfg(feature = "svelte")]
+        extensions.push("svelte");
+        extensions
+    })
+}
 
 impl LanguageAdapter for JavaScriptAdapter {
     fn extensions(&self) -> &'static [&'static str] {
@@ -40,7 +58,11 @@ pub(super) fn resolve_javascript_import(
     specifier: &str,
 ) -> Resolution {
     if specifier.starts_with('.') || specifier.starts_with('/') {
-        return ctx.resolve_path(importer.parent().unwrap_or(&ctx.repo_root), specifier);
+        return ctx.resolve_path(
+            importer.parent().unwrap_or(&ctx.repo_root),
+            specifier,
+            web_extensions(),
+        );
     }
 
     if let Some(path) = resolve_tsconfig_alias(ctx, importer, specifier) {
@@ -95,7 +117,9 @@ fn resolve_tsconfig_alias(ctx: &ResolveCtx, importer: &Path, specifier: &str) ->
 
         for target in targets {
             let candidate = apply_alias_target(target, &captures);
-            if let Resolution::Resolved(resolved) = ctx.resolve_path(&base_dir, &candidate) {
+            if let Resolution::Resolved(resolved) =
+                ctx.resolve_path(&base_dir, &candidate, web_extensions())
+            {
                 return Some(resolved);
             }
         }
@@ -121,32 +145,32 @@ fn resolve_workspace_package(ctx: &ResolveCtx, specifier: &str) -> Option<PathBu
     if let Some(rest) = rest {
         let export_key = format!("./{rest}");
         if let Some(resolved) = resolve_package_export(package, &export_key)
-            .and_then(|path| ctx.try_resolve_candidate(&path))
+            .and_then(|path| ctx.try_resolve_candidate(&path, web_extensions()))
         {
             return Some(resolved);
         }
 
         let direct = package.root.join(rest);
-        if let Some(resolved) = ctx.try_resolve_candidate(&direct) {
+        if let Some(resolved) = ctx.try_resolve_candidate(&direct, web_extensions()) {
             return Some(resolved);
         }
 
         let src_direct = package.root.join("src").join(rest);
-        if let Some(resolved) = ctx.try_resolve_candidate(&src_direct) {
+        if let Some(resolved) = ctx.try_resolve_candidate(&src_direct, web_extensions()) {
             return Some(resolved);
         }
 
         return None;
     }
 
-    if let Some(resolved) =
-        resolve_package_export(package, ".").and_then(|path| ctx.try_resolve_candidate(&path))
+    if let Some(resolved) = resolve_package_export(package, ".")
+        .and_then(|path| ctx.try_resolve_candidate(&path, web_extensions()))
     {
         return Some(resolved);
     }
 
     for candidate in &package.entry_candidates {
-        if let Some(resolved) = ctx.try_resolve_candidate(candidate) {
+        if let Some(resolved) = ctx.try_resolve_candidate(candidate, web_extensions()) {
             return Some(resolved);
         }
     }

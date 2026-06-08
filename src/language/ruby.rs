@@ -33,7 +33,7 @@ impl LanguageAdapter for RubyAdapter {
 fn resolve_ruby_import(ctx: &ResolveCtx, importer: &Path, specifier: &str) -> Option<PathBuf> {
     if specifier.starts_with('.') {
         let base = importer.parent().unwrap_or(&ctx.repo_root);
-        return ctx.try_resolve_candidate(&base.join(specifier));
+        return ctx.try_resolve_candidate(&base.join(specifier), &["rb"]);
     }
 
     for candidate in [
@@ -41,7 +41,7 @@ fn resolve_ruby_import(ctx: &ResolveCtx, importer: &Path, specifier: &str) -> Op
         ctx.repo_root.join("lib").join(specifier),
         ctx.repo_root.join("app").join(specifier),
     ] {
-        if let Some(path) = ctx.try_resolve_candidate(&candidate) {
+        if let Some(path) = ctx.try_resolve_candidate(&candidate, &["rb"]) {
             return Some(path);
         }
     }
