@@ -139,11 +139,30 @@ fn export_target(value: &Value) -> Option<String> {
 }
 
 pub(crate) fn resolve_package_export(package: &PackageInfo, export_key: &str) -> Option<PathBuf> {
+    // Exact (non-wildcard) export keys take precedence over wildcard patterns,
+    // matching Node's `exports` resolution.
     for mapping in &package.export_mappings {
+        if !mapping.key.contains('*') && mapping.key == export_key {
+            return Some(package.root.join(&mapping.target));
+        }
+    }
+
+    // Among wildcard patterns, the most specific wins: the longest literal
+    // prefix before `*`.
+    let mut wildcards: Vec<&ExportMapping> = package
+        .export_mappings
+        .iter()
+        .filter(|mapping| mapping.key.contains('*'))
+        .collect();
+    wildcards
+        .sort_by_key(|mapping| std::cmp::Reverse(mapping.key.split('*').next().unwrap_or("").len()));
+
+    for mapping in wildcards {
         if let Some(captures) = match_alias(&mapping.key, export_key) {
             let target = apply_alias_target(&mapping.target, &captures);
             return Some(package.root.join(target));
         }
     }
+
     None
 }

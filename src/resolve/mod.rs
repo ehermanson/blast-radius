@@ -121,8 +121,16 @@ impl ResolveCtx {
     ) -> Option<PathBuf> {
         let candidate = clean_path(candidate);
 
+        // An exact hit still has to be in the caller's language family — a `.py`
+        // file must not satisfy a JS `import "./model.py"` even though it exists.
         if self.source_files.contains(&candidate) {
-            return Some(candidate);
+            let cross_language = candidate
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| !extensions.contains(&ext));
+            if !cross_language {
+                return Some(candidate);
+            }
         }
 
         for extension in extensions {

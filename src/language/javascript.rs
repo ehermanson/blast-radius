@@ -110,7 +110,16 @@ fn resolve_tsconfig_alias(ctx: &ResolveCtx, importer: &Path, specifier: &str) ->
         .map(|base| clean_path(&tsconfig_dir.join(base)))
         .unwrap_or_else(|| tsconfig_dir.to_path_buf());
 
-    for (pattern, targets) in &tsconfig.compiler_options.paths {
+    // TypeScript picks the most specific pattern, not sorted-key order: exact
+    // patterns first, then wildcards by longest literal prefix before `*`.
+    let mut patterns: Vec<(&String, &Vec<String>)> =
+        tsconfig.compiler_options.paths.iter().collect();
+    patterns.sort_by_key(|(pattern, _)| {
+        let prefix_len = pattern.split('*').next().unwrap_or("").len();
+        (pattern.contains('*'), std::cmp::Reverse(prefix_len))
+    });
+
+    for (pattern, targets) in patterns {
         let Some(captures) = match_alias(pattern, specifier) else {
             continue;
         };

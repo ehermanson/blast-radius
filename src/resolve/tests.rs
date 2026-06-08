@@ -219,6 +219,108 @@ fn resolves_python_absolute_relative_and_package_imports() {
     assert!(!resolver.is_internal_specifier(&importer, "dataclasses"));
 }
 
+#[test]
+fn exact_package_export_wins_over_wildcard() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("packages/ui/src/components/preset")).unwrap();
+    fs::create_dir_all(dir.path().join("apps/web/src")).unwrap();
+    fs::write(
+        dir.path().join("packages/ui/package.json"),
+        r#"{
+            "name":"@acme/ui",
+            "exports":{
+                "./preset":{"dev":"./src/preset.ts"},
+                "./*":{"dev":"./src/components/*/index.ts"}
+            }
+        }"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("packages/ui/src/preset.ts"),
+        "export const preset = true;",
+    )
+    .unwrap();
+    // A wildcard target for `preset` also exists; the exact `./preset` export
+    // must still win.
+    fs::write(
+        dir.path()
+            .join("packages/ui/src/components/preset/index.ts"),
+        "export const wrong = true;",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("apps/web/src/App.tsx"),
+        "import { preset } from '@acme/ui/preset';",
+    )
+    .unwrap();
+
+    let context = RepoContext::discover(dir.path()).unwrap();
+    let resolver = Resolver::new(&context).unwrap();
+    let importer = dir.path().join("apps/web/src/App.tsx");
+
+    assert!(matches!(
+        resolver.resolve(&importer, "@acme/ui/preset"),
+        Resolution::Resolved(path) if path.ends_with("packages/ui/src/preset.ts")
+    ));
+}
+
+#[test]
+fn exact_tsconfig_alias_wins_over_broad_wildcard() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("src/theme")).unwrap();
+    fs::write(
+        dir.path().join("tsconfig.json"),
+        r#"{"compilerOptions":{"baseUrl":".","paths":{
+            "@/*":["src/*"],
+            "@/theme":["src/theme/index.ts"]
+        }}}"#,
+    )
+    .unwrap();
+    fs::write(dir.path().join("package.json"), r#"{"name":"fixture"}"#).unwrap();
+    // Both the broad `@/*` (-> src/theme.ts) and exact `@/theme` targets exist.
+    fs::write(dir.path().join("src/theme.ts"), "export const wrong = 1;").unwrap();
+    fs::write(
+        dir.path().join("src/theme/index.ts"),
+        "export const right = 1;",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("src/App.tsx"),
+        "import { right } from '@/theme';",
+    )
+    .unwrap();
+
+    let context = RepoContext::discover(dir.path()).unwrap();
+    let resolver = Resolver::new(&context).unwrap();
+    let importer = dir.path().join("src/App.tsx");
+
+    assert!(matches!(
+        resolver.resolve(&importer, "@/theme"),
+        Resolution::Resolved(path) if path.ends_with("src/theme/index.ts")
+    ));
+}
+
+#[cfg(feature = "python")]
+#[test]
+fn javascript_import_does_not_resolve_to_python_file() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("src")).unwrap();
+    fs::write(dir.path().join("package.json"), r#"{"name":"fixture"}"#).unwrap();
+    fs::write(dir.path().join("src/app.tsx"), "import './model.py';").unwrap();
+    fs::write(dir.path().join("src/model.py"), "x = 1").unwrap();
+
+    let context = RepoContext::discover(dir.path()).unwrap();
+    let resolver = Resolver::new(&context).unwrap();
+    let importer = dir.path().join("src/app.tsx");
+
+    // An explicit foreign extension must not satisfy a JS import even though the
+    // file is indexed (Python feature compiled in).
+    assert!(matches!(
+        resolver.resolve(&importer, "./model.py"),
+        Resolution::Unresolved
+    ));
+}
+
 #[cfg(feature = "python")]
 #[test]
 fn python_import_does_not_resolve_to_javascript_file() {
