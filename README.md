@@ -1,15 +1,15 @@
 <p align="center">
-  <img src="assets/blast-radius-aggressive.png" alt="blast-radius logo" width="520">
+  <img src="assets/blast-radius-aggressive-transparent.png" alt="blast-radius logo" width="375">
 </p>
 
 # blast-radius
 
-**Before you change a file, find out what else might break.**
+**When you change a file, find out what else might break.**
 
 `blast-radius` is a fast CLI that traces every file that depends — directly or
 transitively — on the code you're about to touch, and gives you a one-glance
 risk verdict. Point it at a file and it answers the question every code review
-asks: *"how far does this change reach?"*
+asks: _"how far does this change reach?"_
 
 ```
    MODERATE   ██████████░░░░░░░░░░  6 impacted files · 2 packages
@@ -113,22 +113,22 @@ impact propagates.
 
 ## Commands
 
-| Command | What it does |
-| --- | --- |
-| `file <path>` | Everything that depends on this file. |
+| Command                | What it does                                        |
+| ---------------------- | --------------------------------------------------- |
+| `file <path>`          | Everything that depends on this file.               |
 | `export <path> <name>` | Everything that depends on a specific named export. |
-| `files <path>...` | Blast radius for each file plus a combined total. |
+| `files <path>...`      | Blast radius for each file plus a combined total.   |
 
 Global flags:
 
-| Flag | Purpose |
-| --- | --- |
-| `--repo-root <dir>` | Repo to analyze (default: current directory). |
-| `--format <tree\|json\|mermaid\|dot>` | Output format (default: `tree`). |
-| `--output <file>` | Write output to a file instead of stdout. |
-| `--verbose`, `-v` | Show the full cascade tree. |
-| `--fail-threshold <n>` | Exit code 2 when more than `n` files are affected. |
-| `--fail-on-risk <tier>` | Exit code 2 when the verdict is at or above `tier`. |
+| Flag                                  | Purpose                                             |
+| ------------------------------------- | --------------------------------------------------- |
+| `--repo-root <dir>`                   | Repo to analyze (default: current directory).       |
+| `--format <tree\|json\|mermaid\|dot>` | Output format (default: `tree`).                    |
+| `--output <file>`                     | Write output to a file instead of stdout.           |
+| `--verbose`, `-v`                     | Show the full cascade tree.                         |
+| `--fail-threshold <n>`                | Exit code 2 when more than `n` files are affected.  |
+| `--fail-on-risk <tier>`               | Exit code 2 when the verdict is at or above `tier`. |
 
 ### Output formats
 
@@ -171,8 +171,8 @@ unresolved-import confidence signal:
 {
   // comments and trailing commas are allowed (parsed as JSONC, like tsconfig)
   "unresolved": {
-    "ignore": ["styled-system/css", ".velite", "/+types/"]
-  }
+    "ignore": ["styled-system/css", ".velite", "/+types/"],
+  },
 }
 ```
 
@@ -184,16 +184,16 @@ automatically. See `examples/chakra-ui/.blast-radius.json`.
 
 The `examples/` directory has runnable fixtures for each supported language:
 
-| Fixture | Exercises |
-| --- | --- |
-| `monorepo-demo` | Aliases, barrels, CommonJS, transitive React usage |
-| `vite-react-ts` | A real Vite React + TypeScript template |
-| `chakra-ui` † | Chakra UI snapshot for large-repo stress testing |
+| Fixture                     | Exercises                                                    |
+| --------------------------- | ------------------------------------------------------------ |
+| `monorepo-demo`             | Aliases, barrels, CommonJS, transitive React usage           |
+| `vite-react-ts`             | A real Vite React + TypeScript template                      |
+| `chakra-ui` †               | Chakra UI snapshot for large-repo stress testing             |
 | `python-demo` / `fastapi` † | Python package, relative, and `__init__.py` reexport imports |
-| `rust-demo` | `mod`, `pub use`, `crate::` / `self::` imports |
-| `component-demo` | Mixed Vue/Svelte component imports |
-| `ruby-demo` | `require_relative`, classes, modules, methods |
-| `java-demo` | Packages, imports, public classes |
+| `rust-demo`                 | `mod`, `pub use`, `crate::` / `self::` imports               |
+| `component-demo`            | Mixed Vue/Svelte component imports                           |
+| `ruby-demo`                 | `require_relative`, classes, modules, methods                |
+| `java-demo`                 | Packages, imports, public classes                            |
 
 † `chakra-ui` and `fastapi` are large real-world snapshots that aren't committed
 to the repo. Fetch them on demand (pinned to a known upstream commit) before
