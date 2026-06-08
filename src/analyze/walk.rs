@@ -416,5 +416,5 @@ fn reexport_matches(imported: &ReexportTarget, current_exports: &BTreeSet<String
 }
 
 fn is_jsx_usage(module: &ModuleFacts, local: &str) -> bool {
-    module.namespace_member_usage.contains_key(local) || module.used_locals.contains(local)
+    module.jsx_namespace_member_usage.contains_key(local) || module.jsx_locals.contains(local)
 }

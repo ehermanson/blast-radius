@@ -82,7 +82,9 @@ pub(super) fn module_facts_from_javascript_module(
     let mut usage_collector = UsageCollector::new(imported_locals, namespace_locals);
     module.visit_with(&mut usage_collector);
     facts.used_locals = usage_collector.used_locals;
+    facts.jsx_locals = usage_collector.jsx_locals;
     facts.namespace_member_usage = usage_collector.namespace_member_usage;
+    facts.jsx_namespace_member_usage = usage_collector.jsx_namespace_member_usage;
 
     Ok(facts)
 }
@@ -466,7 +468,9 @@ struct UsageCollector {
     imported_locals: BTreeSet<String>,
     namespace_locals: BTreeSet<String>,
     used_locals: BTreeSet<String>,
+    jsx_locals: BTreeSet<String>,
     namespace_member_usage: BTreeMap<String, BTreeSet<String>>,
+    jsx_namespace_member_usage: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl UsageCollector {
@@ -475,7 +479,9 @@ impl UsageCollector {
             imported_locals,
             namespace_locals,
             used_locals: BTreeSet::new(),
+            jsx_locals: BTreeSet::new(),
             namespace_member_usage: BTreeMap::new(),
+            jsx_namespace_member_usage: BTreeMap::new(),
         }
     }
 
@@ -491,7 +497,8 @@ impl UsageCollector {
             JSXElementName::Ident(ident) => {
                 let value = ident.sym.to_string();
                 if self.imported_locals.contains(&value) {
-                    self.used_locals.insert(value);
+                    self.used_locals.insert(value.clone());
+                    self.jsx_locals.insert(value);
                 }
             }
             JSXElementName::JSXMemberExpr(expr) => self.mark_jsx_member(expr),
@@ -505,6 +512,10 @@ impl UsageCollector {
             if self.namespace_locals.contains(&namespace) {
                 self.namespace_member_usage
                     .entry(namespace)
+                    .or_default()
+                    .insert(expr.prop.sym.to_string());
+                self.jsx_namespace_member_usage
+                    .entry(object.sym.to_string())
                     .or_default()
                     .insert(expr.prop.sym.to_string());
             }

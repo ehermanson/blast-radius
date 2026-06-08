@@ -184,6 +184,24 @@ fn export_mode_keeps_default_and_named_imports_separate() {
             .iter()
             .any(|label| label == "src/default-consumer.ts")
     );
+    assert!(
+        named["edges"].as_array().unwrap().iter().any(|edge| {
+            edge["to"]
+                .as_str()
+                .is_some_and(|to| to.contains("src/named-consumer.ts"))
+                && edge["kind"] == "imports_named"
+        }),
+        "ordinary named import usage should not be reported as JSX component usage"
+    );
+    assert!(
+        !named["edges"].as_array().unwrap().iter().any(|edge| {
+            edge["to"]
+                .as_str()
+                .is_some_and(|to| to.contains("src/named-consumer.ts"))
+                && edge["kind"] == "uses_jsx_component"
+        }),
+        "ordinary named import usage was incorrectly reported as JSX component usage"
+    );
 
     let default = run_json(repo.path(), &["export", "src/source.ts", "default"]);
     let labels = node_labels(&default);

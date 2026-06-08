@@ -8,7 +8,9 @@ pub struct ModuleFacts {
     pub imports: Vec<ImportFact>,
     pub reexports: Vec<ReexportFact>,
     pub used_locals: BTreeSet<String>,
+    pub jsx_locals: BTreeSet<String>,
     pub namespace_member_usage: BTreeMap<String, BTreeSet<String>>,
+    pub jsx_namespace_member_usage: BTreeMap<String, BTreeSet<String>>,
     pub warnings: Vec<String>,
 }
 
@@ -20,7 +22,9 @@ impl ModuleFacts {
             imports: Vec::new(),
             reexports: Vec::new(),
             used_locals: BTreeSet::new(),
+            jsx_locals: BTreeSet::new(),
             namespace_member_usage: BTreeMap::new(),
+            jsx_namespace_member_usage: BTreeMap::new(),
             warnings: Vec::new(),
         }
     }
