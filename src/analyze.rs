@@ -25,6 +25,14 @@ struct AnalysisData<'a> {
     reverse: &'a BTreeMap<PathBuf, Vec<ConsumerLink>>,
 }
 
+/// Run-level diagnostics gathered before the graph walk, folded into the result.
+struct RunDiagnostics {
+    warnings: Vec<String>,
+    parse_failures: usize,
+    unresolved_imports: usize,
+    skipped_inputs: usize,
+}
+
 pub(super) struct ResolutionCache<'a> {
     resolver: &'a Resolver,
     entries: BTreeMap<(PathBuf, String), Resolution>,
@@ -62,7 +70,8 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
     warnings.extend(resolver.warnings());
     let module_states = build_module_states(&modules);
     let reverse = build_reverse_links(&modules, &module_states, &mut resolution_cache);
-    let unresolved_imports = count_unresolved_imports(&modules, &mut resolution_cache);
+    let unresolved_imports =
+        count_unresolved_imports(&modules, &mut resolution_cache, &context.ignore_unresolved);
     let analysis_data = AnalysisData {
         context,
         modules: &modules,
@@ -89,10 +98,12 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
                     export_name: export_name.clone(),
                 },
                 &analysis_data,
-                warnings,
-                parse_failures,
-                unresolved_imports,
-                0,
+                RunDiagnostics {
+                    warnings,
+                    parse_failures,
+                    unresolved_imports,
+                    skipped_inputs: 0,
+                },
                 vec![(file, exports)],
             )
         }
@@ -111,10 +122,12 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
                 AnalysisMode::File,
                 AnalysisTarget::File { file: file.clone() },
                 &analysis_data,
-                warnings,
-                parse_failures,
-                unresolved_imports,
-                0,
+                RunDiagnostics {
+                    warnings,
+                    parse_failures,
+                    unresolved_imports,
+                    skipped_inputs: 0,
+                },
                 vec![(file, exports)],
             )
         }
@@ -158,10 +171,12 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
                 AnalysisMode::Files,
                 AnalysisTarget::Files { files: normalized },
                 &analysis_data,
-                warnings,
-                parse_failures,
-                unresolved_imports,
-                skipped_inputs,
+                RunDiagnostics {
+                    warnings,
+                    parse_failures,
+                    unresolved_imports,
+                    skipped_inputs,
+                },
                 roots,
             )
         }
@@ -241,12 +256,15 @@ fn analyze_from_roots(
     mode: AnalysisMode,
     target: AnalysisTarget,
     data: &AnalysisData<'_>,
-    mut warnings: Vec<String>,
-    parse_failures: usize,
-    unresolved_imports: usize,
-    skipped_inputs: usize,
+    diagnostics: RunDiagnostics,
     roots: Vec<(PathBuf, BTreeSet<String>)>,
 ) -> Result<AnalysisResult> {
+    let RunDiagnostics {
+        mut warnings,
+        parse_failures,
+        unresolved_imports,
+        skipped_inputs,
+    } = diagnostics;
     let ambiguous_edges = data
         .modules
         .values()

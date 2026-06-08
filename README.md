@@ -103,6 +103,27 @@ file types were compiled into it.
 - `mermaid`
 - `dot`
 
+## Configuration
+
+An optional `.blast-radius.json` at the repo root lets a repository declare
+tooling-specific quirks the analyzer shouldn't hardcode. Currently it supports
+ignoring import specifiers that point at generated/virtual modules (CSS-in-JS
+codegen, route type stubs, published `dist` output, etc.) so they don't count
+toward the unresolved-import signal:
+
+```jsonc
+{
+  // comments and trailing commas are allowed (parsed as JSONC, like tsconfig)
+  "unresolved": {
+    "ignore": ["styled-system/css", ".velite", "/+types/"]
+  }
+}
+```
+
+Each entry is matched as a substring of the import specifier. Asset imports
+(`.svg`, `.css`, `.json`, images, …) and type-only imports are ignored
+automatically and need no configuration. See `examples/chakra-ui/.blast-radius.json`.
+
 ## Examples
 
 - `examples/monorepo-demo`

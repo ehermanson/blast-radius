@@ -1,0 +1,19 @@
+{
+  // blast-radius config for the Chakra UI snapshot.
+  //
+  // These import specifiers point at modules this repo's tooling generates at
+  // build time (Panda/styled-system codegen, Velite content, TanStack Router
+  // type stubs, published dist output). They have no on-disk source, so they
+  // should not count toward the unresolved-import signal.
+  "unresolved": {
+    "ignore": [
+      "styled-system/recipes",
+      "styled-system/patterns",
+      "styled-system/css",
+      ".velite",
+      "/+types/",
+      "/dist/esm/",
+      "/dist/cjs/"
+    ]
+  }
+}

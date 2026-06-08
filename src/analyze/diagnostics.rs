@@ -9,12 +9,13 @@ use super::ResolutionCache;
 pub(super) fn count_unresolved_imports(
     modules: &BTreeMap<PathBuf, ModuleFacts>,
     resolution_cache: &mut ResolutionCache<'_>,
+    ignore: &[String],
 ) -> usize {
     let mut count = 0;
 
     for module in modules.values() {
         for import in &module.imports {
-            if !should_count_unresolved_import(import) {
+            if !should_count_unresolved_import(import, ignore) {
                 continue;
             }
             if !resolution_cache.is_internal_specifier(&module.file, &import.source) {
@@ -32,31 +33,32 @@ pub(super) fn count_unresolved_imports(
     count
 }
 
-fn should_count_unresolved_import(import: &ImportFact) -> bool {
+/// Import extensions that are assets/data rather than code modules, so a missing
+/// resolution is expected and shouldn't count against the unresolved metric.
+/// These are language-neutral; repo/tooling-specific virtual modules (e.g. CSS-in-JS
+/// codegen, route type stubs) are declared per-repo via `ignore_unresolved`.
+const NON_CODE_IMPORT_EXTENSIONS: &[&str] = &[
+    ".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".css", ".scss", ".sass", ".less",
+    ".json", ".yaml", ".yml", ".md", ".mdx",
+];
+
+fn should_count_unresolved_import(import: &ImportFact, ignore: &[String]) -> bool {
     if import.type_only {
         return false;
     }
 
     let source = import.source.as_str();
-    if source.contains(".velite") {
-        return false;
-    }
-    if source.contains("/+types/") || source.starts_with("./+types/") {
-        return false;
-    }
-    if source.ends_with("package.json") {
-        return false;
-    }
-    if source.ends_with(".svg") {
-        return false;
-    }
-    if source.contains("styled-system/recipes")
-        || source.contains("styled-system/patterns")
-        || source.contains("styled-system/css")
+    // Bundler imports carry query/hash suffixes (`./logo.svg?react`, `./a.css#x`);
+    // match the extension on the path portion only.
+    let path = source.split(['?', '#']).next().unwrap_or(source);
+    if NON_CODE_IMPORT_EXTENSIONS
+        .iter()
+        .any(|extension| path.ends_with(extension))
     {
         return false;
     }
-    if source.contains("/dist/esm/") || source.contains("/dist/cjs/") {
+
+    if ignore.iter().any(|pattern| source.contains(pattern)) {
         return false;
     }
 
@@ -80,30 +82,62 @@ mod tests {
     }
 
     #[test]
-    fn skips_unresolved_imports_that_are_known_generated_or_asset_inputs() {
+    fn skips_asset_imports_without_any_config() {
+        for source in [
+            "./package.json",
+            "./logo.svg",
+            "../styles/theme.css",
+            "./tokens.json",
+            "./content.mdx",
+        ] {
+            assert!(!should_count_unresolved_import(&import(source, false), &[]));
+        }
+    }
+
+    #[test]
+    fn skips_asset_imports_with_query_or_hash_suffixes() {
+        for source in [
+            "./logo.svg?react",
+            "./style.css?inline",
+            "./data.json?raw",
+            "./icon.svg#symbol",
+            "./image.png?url",
+        ] {
+            assert!(!should_count_unresolved_import(&import(source, false), &[]));
+        }
+    }
+
+    #[test]
+    fn skips_repo_configured_ignore_patterns() {
+        let ignore = vec![
+            ".velite".to_string(),
+            "/+types/".to_string(),
+            "styled-system/css".to_string(),
+            "/dist/esm/".to_string(),
+        ];
         for source in [
             "./.velite/generated",
             "./+types/root",
             "./routes/+types/page",
-            "./package.json",
-            "./logo.svg",
-            "./styled-system/recipes",
-            "./styled-system/patterns",
             "./styled-system/css",
             "./pkg/dist/esm/index",
-            "./pkg/dist/cjs/index",
         ] {
-            assert!(!should_count_unresolved_import(&import(source, false)));
+            assert!(!should_count_unresolved_import(&import(source, false), &ignore));
         }
     }
 
     #[test]
     fn skips_type_only_unresolved_imports() {
-        assert!(!should_count_unresolved_import(&import("./types", true)));
+        assert!(!should_count_unresolved_import(&import("./types", true), &[]));
     }
 
     #[test]
     fn counts_regular_runtime_imports() {
-        assert!(should_count_unresolved_import(&import("./missing", false)));
+        assert!(should_count_unresolved_import(&import("./missing", false), &[]));
+        // The same specifier with no matching ignore pattern is still counted.
+        assert!(should_count_unresolved_import(
+            &import("./missing", false),
+            &["styled-system/css".to_string()]
+        ));
     }
 }
