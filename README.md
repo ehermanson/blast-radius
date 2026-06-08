@@ -4,112 +4,168 @@
 
 # blast-radius
 
-`blast-radius` is a Rust CLI for estimating the transitive impact of frontend code changes across a repository.
+**Before you change a file, find out what else might break.**
 
-## Features
+`blast-radius` is a fast CLI that traces every file that depends — directly or
+transitively — on the code you're about to touch, and gives you a one-glance
+risk verdict. Point it at a file and it answers the question every code review
+asks: *"how far does this change reach?"*
 
-- AST-based parsing for `ts`, `tsx`, `js`, and `jsx`
-- ESM imports/exports and CommonJS `require` / `module.exports`
-- Default exports, named exports, barrels, and `export *`
-- `tsconfig.json` path aliases
-- Cross-package resolution for in-repo workspace packages
-- Optional Vue single-file component support behind `--features vue`
-- Optional Svelte component support behind `--features svelte`
-- Optional Python support behind `--features python`
-- Optional Rust support behind `--features rust`
-- Optional Ruby support behind `--features ruby`
-- Optional Java support behind `--features java`
-- Terminal tree, JSON, Mermaid, and Graphviz DOT output
-- At-a-glance risk verdict (minor / moderate / risky / high) with impacted files listed per package
-- Multi-file runs show a combined verdict plus a per-file breakdown
-- `export`, `file`, and `files` modes
+```
+   MODERATE   ██████████░░░░░░░░░░  6 impacted files · 2 packages
+  3 direct, 3 indirect · depth 2 · 1 endpoint
 
-## Commands
-
-```bash
-blast-radius export packages/ui/src/Button.tsx Button
-blast-radius file packages/ui/src/Button.tsx
-blast-radius files packages/ui/src/Button.tsx packages/ui/src/Card.tsx
+  ── IMPACTED FILES · 6 IN 2 PACKAGES ──────────────────────
+  apps/storefront (3)
+    apps/storefront/src/App.tsx  ◎ endpoint
+    apps/storefront/src/LegacyButtonCard.jsx
+    apps/storefront/src/PromoCard.tsx
+  packages/ui (3)
+    packages/ui/src/Card.tsx
+    packages/ui/src/Toolbar.tsx
+    packages/ui/src/index.ts
 ```
 
-`files` takes a list of paths and reports each file's blast radius plus a combined
-total. It is designed for tools like `lint-staged`, Husky, Lefthook, and the
-`pre-commit` framework to pass changed filenames in explicitly.
+Use it to:
 
-## Local Pipeline Usage
+- **Gut-check a change** before you start — is this a 2-file tweak or a 200-file ripple?
+- **Catch surprises in code review** — surface the files a diff touches that aren't in the diff.
+- **Gate risky commits in CI or pre-commit hooks** — fail the build when a change reaches too far.
 
-Install the binary:
+It works out of the box for JavaScript and TypeScript repos (including monorepos),
+and supports Python, Rust, Ruby, Java, Vue, and Svelte as optional add-ons.
+
+## Quick start
+
+Install the binary (requires a Rust toolchain with `cargo`):
 
 ```bash
+# Straight from GitHub
+cargo install --git https://github.com/ehermanson/blast-radius
+
+# Or from a local clone
 cargo install --path .
 ```
 
-Install with optional frontend component support first if the repo uses Vue or
-Svelte:
+Then point it at any file in your repo:
 
 ```bash
-cargo install --path . --features vue,svelte
+# What depends on this component?
+blast-radius file src/components/Button.tsx
+
+# What depends on a specific export?
+blast-radius export src/components/Button.tsx Button
+
+# Check several files at once (e.g. everything in a commit)
+blast-radius files src/components/Button.tsx src/components/Card.tsx
 ```
 
-Then call `blast-radius files` from your existing hook manager. For example,
-with `lint-staged`:
+By default it analyzes the current directory. Use `--repo-root` to point
+elsewhere:
+
+```bash
+blast-radius --repo-root ../my-app file src/App.tsx
+```
+
+## Use it in pre-commit hooks and CI
+
+The most common setup is to run `blast-radius` on changed files so you (and
+your reviewers) see the reach of a commit before it lands.
+
+`files` takes a list of paths and reports each file's blast radius plus a
+combined total — designed to receive staged filenames from hook managers like
+`lint-staged`, Husky, Lefthook, and `pre-commit`. For example, with
+`lint-staged`:
 
 ```json
 {
   "lint-staged": {
-    "*.{js,jsx,ts,tsx,vue,svelte}": "bash -c 'blast-radius --repo-root . files \"$@\" || true' --"
+    "*.{js,jsx,ts,tsx}": "bash -c 'blast-radius --repo-root . files \"$@\" || true' --"
   }
 }
 ```
 
-See `docs/local-toolchain.md` for hook-manager examples with `lint-staged`,
-Lefthook, and the `pre-commit` framework.
-
-## Language Support
-
-Language support is selected at build time with Cargo features, not runtime CLI
-flags. The default binary supports JS/TS only.
+To turn the verdict into a gate, exit non-zero when a change reaches too far:
 
 ```bash
-# JS/TS only
-cargo build
+# Fail (exit code 2) if a change touches more than 50 files
+blast-radius --fail-threshold 50 files "$@"
 
-# JS/TS + Python
-cargo build --features python
-
-# JS/TS + Rust
-cargo build --features rust
-
-# JS/TS + Vue + Svelte
-cargo build --features vue,svelte
-
-# JS/TS + Ruby
-cargo build --features ruby
-
-# JS/TS + Java
-cargo build --features java
-
-# JS/TS + every optional adapter
-cargo build --features python,rust,vue,svelte,ruby,java
+# Or fail when the risk verdict hits "risky" or above
+blast-radius --fail-on-risk risky files "$@"
 ```
 
-There is no `--language` or `--languages` CLI flag yet. A binary scans whatever
-file types were compiled into it.
+See `docs/local-toolchain.md` for ready-to-paste examples with `lint-staged`,
+Lefthook, and the `pre-commit` framework.
 
-## Output Formats
+## Reading the output
 
-- `tree` — leads with a risk verdict and meter, then (for multi-file runs) a per-input-file breakdown, then the impacted files listed in full and grouped by package, with endpoints flagged. Pass `--verbose` (`-v`) for the full root → cascade tree. The per-file breakdown is also available in `json` as the `roots` array.
-- `json`
-- `mermaid`
-- `dot`
+The default `tree` output leads with a **risk verdict** — `minor`, `moderate`,
+`risky`, or `high` — plus a meter and the counts behind it, then lists the
+impacted files grouped by package. Files marked `◎ endpoint` are entry points
+(apps, routes, pages) — a signal the change can reach something user-facing.
+
+The last line reports **confidence**: how many files were scanned and whether
+any import edges were ambiguous, so you know how much to trust the result.
+
+Pass `--verbose` (`-v`) to see the full root → cascade tree of exactly how the
+impact propagates.
+
+## Commands
+
+| Command | What it does |
+| --- | --- |
+| `file <path>` | Everything that depends on this file. |
+| `export <path> <name>` | Everything that depends on a specific named export. |
+| `files <path>...` | Blast radius for each file plus a combined total. |
+
+Global flags:
+
+| Flag | Purpose |
+| --- | --- |
+| `--repo-root <dir>` | Repo to analyze (default: current directory). |
+| `--format <tree\|json\|mermaid\|dot>` | Output format (default: `tree`). |
+| `--output <file>` | Write output to a file instead of stdout. |
+| `--verbose`, `-v` | Show the full cascade tree. |
+| `--fail-threshold <n>` | Exit code 2 when more than `n` files are affected. |
+| `--fail-on-risk <tier>` | Exit code 2 when the verdict is at or above `tier`. |
+
+### Output formats
+
+- `tree` — the default human-readable verdict, meter, and impacted-file list.
+- `json` — structured output; the per-input-file breakdown lives in the `roots` array.
+- `mermaid` — a Mermaid graph definition.
+- `dot` — Graphviz DOT.
+
+## Language support
+
+The default binary supports **JavaScript and TypeScript** (`js`, `jsx`, `ts`,
+`tsx`), including ESM imports/exports, CommonJS `require`/`module.exports`,
+default and named exports, barrels, `export *`, `tsconfig.json` path aliases,
+and cross-package resolution across workspace packages.
+
+Other languages are compiled in at **build time** with Cargo features (there is
+no runtime `--language` flag — a binary scans whatever was built into it):
+
+```bash
+cargo install --path .                              # JS/TS only (default)
+cargo install --path . --features python            # + Python
+cargo install --path . --features rust              # + Rust
+cargo install --path . --features ruby              # + Ruby
+cargo install --path . --features java              # + Java
+cargo install --path . --features vue,svelte        # + Vue + Svelte
+cargo install --path . --features python,rust,vue,svelte,ruby,java   # everything
+```
+
+See `docs/language-support.md` for the multi-language architecture.
 
 ## Configuration
 
 An optional `.blast-radius.json` at the repo root lets a repository declare
-tooling-specific quirks the analyzer shouldn't hardcode. Currently it supports
-ignoring import specifiers that point at generated/virtual modules (CSS-in-JS
-codegen, route type stubs, published `dist` output, etc.) so they don't count
-toward the unresolved-import signal:
+tooling quirks the analyzer shouldn't hardcode. Today it supports ignoring
+import specifiers that point at generated/virtual modules (CSS-in-JS codegen,
+route type stubs, published `dist` output, etc.) so they don't count against the
+unresolved-import confidence signal:
 
 ```jsonc
 {
@@ -122,114 +178,55 @@ toward the unresolved-import signal:
 
 Each entry is matched as a substring of the import specifier. Asset imports
 (`.svg`, `.css`, `.json`, images, …) and type-only imports are ignored
-automatically and need no configuration. See `examples/chakra-ui/.blast-radius.json`.
+automatically. See `examples/chakra-ui/.blast-radius.json`.
 
 ## Examples
 
-- `examples/monorepo-demo`
-  A purpose-built workspace fixture that exercises aliases, barrels, CommonJS, and transitive React component usage.
-- `examples/vite-react-ts`
-  A real React + TypeScript template copied from Vite.
-- `examples/chakra-ui`
-  A vendored snapshot of the Chakra UI monorepo for large-repo stress testing.
-- `examples/python-demo`
-  A small Python package that exercises package imports, relative imports, and
-  `__init__.py` reexports.
-- `examples/fastapi`
-  A vendored snapshot of FastAPI for large Python repo stress testing.
-- `examples/rust-demo`
-  A small Rust crate that exercises `mod`, `pub use`, and `crate::` / `self::`
-  imports.
-- `examples/component-demo`
-  A small mixed Vue/Svelte fixture that exercises component script imports and
-  default component imports.
-- `examples/ruby-demo`
-  A small Ruby project that exercises `require_relative`, classes, modules, and
-  methods.
-- `examples/java-demo`
-  A small Java project that exercises packages, imports, and public classes.
+The `examples/` directory has runnable fixtures for each supported language:
 
-Example run:
+| Fixture | Exercises |
+| --- | --- |
+| `monorepo-demo` | Aliases, barrels, CommonJS, transitive React usage |
+| `vite-react-ts` | A real Vite React + TypeScript template |
+| `chakra-ui` | Vendored Chakra UI snapshot for large-repo stress testing |
+| `python-demo` / `fastapi` | Python package, relative, and `__init__.py` reexport imports |
+| `rust-demo` | `mod`, `pub use`, `crate::` / `self::` imports |
+| `component-demo` | Mixed Vue/Svelte component imports |
+| `ruby-demo` | `require_relative`, classes, modules, methods |
+| `java-demo` | Packages, imports, public classes |
+
+Run against any of them with `--repo-root`:
 
 ```bash
-cargo run --bin blast-radius -- --repo-root examples/monorepo-demo export packages/ui/src/Button.tsx Button
-```
-
-More example runs:
-
-```bash
-# Analyze a single file in the small monorepo fixture
+# JS/TS monorepo fixture
 cargo run --bin blast-radius -- --repo-root examples/monorepo-demo file apps/storefront/src/App.tsx
 
-# Analyze a symbol export in the small monorepo fixture
-cargo run --bin blast-radius -- --repo-root examples/monorepo-demo export packages/ui/src/Button.tsx Button
+# Large React monorepo, with the full cascade tree
+cargo run --bin blast-radius -- --repo-root examples/chakra-ui -v file packages/react/src/components/button/button.tsx
 
-# Analyze a real Vite React app file
-cargo run --bin blast-radius -- --repo-root examples/vite-react-ts file src/App.tsx
-
-# Stress test against a larger React monorepo
-cargo run --bin blast-radius -- --repo-root examples/chakra-ui file packages/react/src/components/button/button.tsx
-
-# Show the full cascade tree for the same Chakra UI file
-cargo run --bin blast-radius -- --repo-root examples/chakra-ui --verbose file packages/react/src/components/button/button.tsx
-
-# Analyze a Python package fixture
-cargo run --features python --bin blast-radius -- --repo-root examples/python-demo file app/utils/formatting.py
-
-# Stress test against a larger Python repo
+# Python (needs the feature compiled in)
 cargo run --features python --bin blast-radius -- --repo-root examples/fastapi file fastapi/applications.py
 
-# Analyze a Rust crate fixture
+# Rust
 cargo run --features rust --bin blast-radius -- --repo-root examples/rust-demo file src/utils/formatting.rs
 
-# Analyze a mixed Vue/Svelte component fixture
+# Vue/Svelte
 cargo run --features vue,svelte --bin blast-radius -- --repo-root examples/component-demo file src/shared.ts
-
-# Analyze a Ruby fixture
-cargo run --features ruby --bin blast-radius -- --repo-root examples/ruby-demo file lib/app/utils/formatter.rb
-
-# Analyze a Java fixture
-cargo run --features java --bin blast-radius -- --repo-root examples/java-demo file src/main/java/com/example/util/Formatter.java
 ```
 
 ## Development
 
-This project expects a Rust toolchain with `cargo` available locally.
-
-Useful local quality commands:
+This project expects a Rust toolchain with `cargo` available locally. Common
+quality commands:
 
 ```bash
-make test
-make test-python
-make test-rust
-make test-components
-make test-ruby
-make test-java
-make test-all-languages
-make coverage
-make coverage-gate
-make stress-chakra
-make stress-python-demo
-make stress-fastapi
-make stress-rust-demo
-make stress-components
-make stress-ruby-demo
-make stress-java-demo
-make smoke-mui
-make perf
-make metrics
-make quality
-make quality-python
-make quality-rust
-make quality-components
-make quality-ruby
-make quality-java
+make test                 # core JS/TS test suite
+make test-all-languages   # every optional adapter
+make coverage             # coverage report
+make quality              # full quality gate
 ```
 
-See `docs/quality.md` for what each command validates.
-
-See `docs/local-toolchain.md` for install instructions and non-blocking
-hook-manager examples.
-
-See `docs/language-support.md` for the multi-language architecture and next
-language-adapter work.
+The `Makefile` has the full set, including per-language test/quality/stress
+targets (`make test-python`, `make stress-chakra`, etc.). See `docs/quality.md`
+for what each command validates and `docs/language-support.md` for the
+multi-language architecture.

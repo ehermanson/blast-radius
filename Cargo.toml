@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 description = "Analyze the transitive blast radius of frontend code changes."
 license = "MIT"
-repository = "https://example.com/erichermanson/blast-radius"
+repository = "https://github.com/ehermanson/blast-radius"
 
 [features]
 default = ["javascript"]
