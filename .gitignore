@@ -1,2 +1,11 @@
 /target
 /.DS_Store
+.DS_Store
+
+# Large vendored upstream snapshots are fetched on demand, not committed.
+# See scripts/fetch-examples.sh. These ignore the snapshot directory itself
+# (not its contents) so the analyzer can still scan it when pointed at it as a
+# repo root. The tiny overlay files (.blast-radius.json, UPSTREAM.md) stay
+# tracked because .gitignore never untracks files already in the index.
+/examples/chakra-ui/
+/examples/fastapi/

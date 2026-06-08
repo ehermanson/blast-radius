@@ -17,6 +17,9 @@ jobs:
 
       - uses: taiki-e/install-action@cargo-llvm-cov
 
+      - name: Fetch example snapshots
+        run: ./scripts/fetch-examples.sh
+
       - name: Run tests
         run: cargo test
 
@@ -35,6 +38,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
+
+      - name: Fetch example snapshots
+        run: ./scripts/fetch-examples.sh
 
       - name: Run Python feature tests
         run: cargo test --features python

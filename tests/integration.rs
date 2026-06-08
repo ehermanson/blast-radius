@@ -606,6 +606,13 @@ fn file_mode_skips_unparseable_files_and_reports_them() {
 #[test]
 fn chakra_ui_example_analyzes_real_world_repo() {
     let repo = chakra_example_root();
+    if !repo.join("package.json").exists() {
+        eprintln!(
+            "skipping chakra_ui_example_analyzes_real_world_repo: examples/chakra-ui \
+             not fetched (run scripts/fetch-examples.sh)"
+        );
+        return;
+    }
 
     let output = AssertCommand::cargo_bin("blast-radius")
         .unwrap()
@@ -761,6 +768,13 @@ fn python_export_mode_tracks_reexports() {
 #[test]
 fn fastapi_example_analyzes_real_world_python_repo() {
     let repo = fastapi_example_root();
+    if !repo.join("pyproject.toml").exists() {
+        eprintln!(
+            "skipping fastapi_example_analyzes_real_world_python_repo: examples/fastapi \
+             not fetched (run scripts/fetch-examples.sh)"
+        );
+        return;
+    }
 
     let output = AssertCommand::cargo_bin("blast-radius")
         .unwrap()

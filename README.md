@@ -188,12 +188,20 @@ The `examples/` directory has runnable fixtures for each supported language:
 | --- | --- |
 | `monorepo-demo` | Aliases, barrels, CommonJS, transitive React usage |
 | `vite-react-ts` | A real Vite React + TypeScript template |
-| `chakra-ui` | Vendored Chakra UI snapshot for large-repo stress testing |
-| `python-demo` / `fastapi` | Python package, relative, and `__init__.py` reexport imports |
+| `chakra-ui` † | Chakra UI snapshot for large-repo stress testing |
+| `python-demo` / `fastapi` † | Python package, relative, and `__init__.py` reexport imports |
 | `rust-demo` | `mod`, `pub use`, `crate::` / `self::` imports |
 | `component-demo` | Mixed Vue/Svelte component imports |
 | `ruby-demo` | `require_relative`, classes, modules, methods |
 | `java-demo` | Packages, imports, public classes |
+
+† `chakra-ui` and `fastapi` are large real-world snapshots that aren't committed
+to the repo. Fetch them on demand (pinned to a known upstream commit) before
+running their examples:
+
+```bash
+scripts/fetch-examples.sh
+```
 
 Run against any of them with `--repo-root`:
 

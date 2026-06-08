@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 
 const repoRoot = process.cwd();
 const binary = `${repoRoot}/target/debug/blast-radius`;
@@ -46,6 +46,14 @@ const metrics = {
 };
 
 for (const testCase of cases) {
+  // repo-root is the value right after the "--repo-root" flag.
+  const repoRootArg = testCase.args[testCase.args.indexOf("--repo-root") + 1];
+  if (!existsSync(`${repoRoot}/${repoRootArg}`)) {
+    console.warn(
+      `skipping ${testCase.name}: ${repoRootArg} not present (run scripts/fetch-examples.sh)`,
+    );
+    continue;
+  }
   const raw = execFileSync(binary, testCase.args, {
     cwd: repoRoot,
     encoding: "utf8",

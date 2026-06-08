@@ -5,6 +5,15 @@ edition = "2024"
 description = "Analyze the transitive blast radius of frontend code changes."
 license = "MIT"
 repository = "https://github.com/ehermanson/blast-radius"
+# Keep the published crate small: example repos (incl. large vendored snapshots),
+# assets, and CI/dev tooling are not needed to build or use the binary.
+exclude = [
+    "examples/",
+    "assets/",
+    "docs/",
+    "scripts/",
+    ".github/",
+]
 
 [features]
 default = ["javascript"]

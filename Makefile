@@ -1,9 +1,13 @@
 SHELL := /bin/zsh
 
-.PHONY: test test-python test-rust test-components test-ruby test-java test-all-languages coverage coverage-gate perf quality quality-python quality-rust quality-components quality-ruby quality-java stress-chakra stress-python-demo stress-fastapi stress-rust-demo stress-components stress-ruby-demo stress-java-demo smoke-mui build metrics
+.PHONY: test test-python test-rust test-components test-ruby test-java test-all-languages coverage coverage-gate perf quality quality-python quality-rust quality-components quality-ruby quality-java stress-chakra stress-python-demo stress-fastapi stress-rust-demo stress-components stress-ruby-demo stress-java-demo smoke-mui build metrics fetch-examples
 
 build:
 	cargo build
+
+# Fetch the large vendored snapshots (Chakra UI, FastAPI) that are not committed.
+fetch-examples:
+	./scripts/fetch-examples.sh
 
 test:
 	cargo test
@@ -32,13 +36,13 @@ coverage:
 coverage-gate:
 	cargo llvm-cov --summary-only --fail-under-lines 85 --fail-under-regions 83 --fail-under-functions 84
 
-stress-chakra: build
+stress-chakra: build fetch-examples
 	./target/debug/blast-radius --repo-root examples/chakra-ui file packages/react/src/components/button/button.tsx
 
 stress-python-demo:
 	cargo run --features python --bin blast-radius -- --repo-root examples/python-demo file app/utils/formatting.py
 
-stress-fastapi:
+stress-fastapi: fetch-examples
 	cargo run --features python --bin blast-radius -- --repo-root examples/fastapi file fastapi/applications.py
 
 stress-rust-demo:
@@ -66,7 +70,7 @@ perf: build
 		'./target/debug/blast-radius --repo-root examples/vite-react-ts file src/App.tsx' \
 		'./target/debug/blast-radius --repo-root examples/chakra-ui file packages/react/src/components/button/button.tsx'
 
-metrics: build
+metrics: build fetch-examples
 	node scripts/collect_metrics.mjs
 
 quality: test coverage-gate stress-chakra
