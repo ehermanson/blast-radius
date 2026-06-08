@@ -72,12 +72,10 @@ impl RepoContext {
 
             let path = entry.into_path();
             match path.file_name().and_then(|name| name.to_str()) {
-                Some("tsconfig.json") => {
-                    match load_tsconfig(&path) {
-                        Ok(config) => tsconfigs.push(config),
-                        Err(error) => warnings.push(format!("{error:#}")),
-                    }
-                }
+                Some("tsconfig.json") => match load_tsconfig(&path) {
+                    Ok(config) => tsconfigs.push(config),
+                    Err(error) => warnings.push(format!("{error:#}")),
+                },
                 Some("package.json") => package_jsons.push(path.clone()),
                 _ => {}
             }
