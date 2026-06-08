@@ -378,6 +378,55 @@ fn files_mode_with_all_unknown_inputs_reports_empty_with_warnings() {
 }
 
 #[test]
+fn fail_on_risk_gates_exit_code_at_or_above_tier() {
+    let repo = tempdir().unwrap();
+    fs::create_dir_all(repo.path().join("src")).unwrap();
+    fs::write(repo.path().join("src/source.ts"), "export const x = 1;\n").unwrap();
+    for name in ["a", "b", "c", "d"] {
+        fs::write(
+            repo.path().join(format!("src/{name}.ts")),
+            "import { x } from './source';\nexport const v = x + 1;\n",
+        )
+        .unwrap();
+    }
+
+    // 4 downstream files in a single package => Moderate verdict, surfaced in JSON.
+    let json = run_json(repo.path(), &["file", "src/source.ts"]);
+    assert_eq!(json["summary"]["risk_tier"].as_str().unwrap(), "moderate");
+
+    // A threshold at the verdict trips the gate (exit 2).
+    AssertCommand::cargo_bin("blast-radius")
+        .unwrap()
+        .current_dir(repo.path())
+        .args([
+            "--repo-root",
+            repo.path().to_str().unwrap(),
+            "--fail-on-risk",
+            "moderate",
+            "file",
+            "src/source.ts",
+        ])
+        .assert()
+        .failure()
+        .code(2);
+
+    // A threshold stricter than the verdict passes.
+    AssertCommand::cargo_bin("blast-radius")
+        .unwrap()
+        .current_dir(repo.path())
+        .args([
+            "--repo-root",
+            repo.path().to_str().unwrap(),
+            "--fail-on-risk",
+            "risky",
+            "file",
+            "src/source.ts",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
 fn file_mode_reports_tree_output() {
     let repo = setup_repo();
 

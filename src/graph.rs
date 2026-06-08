@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
+use clap::ValueEnum;
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
@@ -96,6 +97,40 @@ pub struct Summary {
     /// Input paths passed to `files` mode that were skipped because they were
     /// missing on disk or not recognized source files.
     pub skipped_inputs: usize,
+    /// The headline risk verdict for this run, derived from reach and spread.
+    pub risk_tier: RiskTier,
+}
+
+/// The headline blast-radius verdict. Ordered least-to-most severe so callers
+/// can gate on `tier >= threshold` (see `--fail-on-risk`).
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, ValueEnum,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum RiskTier {
+    #[default]
+    Minor,
+    Moderate,
+    Risky,
+    High,
+}
+
+/// Reach and spread drive the tier; ambiguity is surfaced as a confidence
+/// caveat elsewhere rather than inflating the score, so the headline stays
+/// trustworthy. `affected` counts downstream files (excludes the target);
+/// `packages` is the number of distinct packages they span.
+pub fn compute_tier(affected: usize, packages: usize) -> RiskTier {
+    if affected == 0 {
+        RiskTier::Minor
+    } else if affected > 25 || packages >= 3 {
+        RiskTier::High
+    } else if affected <= 3 && packages <= 1 {
+        RiskTier::Minor
+    } else if affected <= 10 && packages <= 2 {
+        RiskTier::Moderate
+    } else {
+        RiskTier::Risky
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]

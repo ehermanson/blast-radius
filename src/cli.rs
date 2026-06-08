@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use clap::{Parser, ValueEnum};
 
+use crate::graph::RiskTier;
+
 #[derive(Debug, Clone, Parser)]
 #[command(name = "blast-radius")]
 #[command(
@@ -25,8 +27,13 @@ pub struct Cli {
     #[arg(long, short = 'v', global = true, default_value_t = false)]
     pub verbose: bool,
 
+    /// Exit non-zero (code 2) when more than this many files are affected.
     #[arg(long)]
     pub fail_threshold: Option<usize>,
+
+    /// Exit non-zero (code 2) when the risk verdict is at or above this tier.
+    #[arg(long, value_enum)]
+    pub fail_on_risk: Option<RiskTier>,
 }
 
 #[derive(Debug, Clone, Parser)]

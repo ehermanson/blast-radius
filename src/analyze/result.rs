@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use crate::fs::RepoContext;
 use crate::graph::{
     AnalysisMode, AnalysisResult, AnalysisTarget, GraphEdge, GraphNode, ModuleState, NodeKind,
-    RootImpact, Summary, Workspace,
+    RootImpact, Summary, Workspace, compute_tier, package_key,
 };
 
 use super::walk::{AffectedState, ImpactReason};
@@ -87,6 +87,19 @@ pub(super) fn build_result(
     let directly_affected_files = states.values().filter(|state| state.depth == 1).count();
     let transitively_affected_files = states.values().filter(|state| state.depth > 1).count();
 
+    // The verdict mirrors the report's view of impact: downstream file nodes and
+    // the distinct packages they span. Computed here so the tier is a canonical
+    // part of the result (JSON + the `--fail-on-risk` gate), not a render detail.
+    let mut affected = 0;
+    let mut affected_packages = BTreeSet::new();
+    for node in &nodes {
+        if node.kind == NodeKind::File && node.depth >= 1 {
+            affected += 1;
+            affected_packages.insert(package_key(&node.label, &metadata.workspaces));
+        }
+    }
+    let risk_tier = compute_tier(affected, affected_packages.len());
+
     AnalysisResult {
         mode: metadata.mode,
         target: metadata.target,
@@ -100,6 +113,7 @@ pub(super) fn build_result(
             ambiguous_edges: metadata.ambiguous_edges,
             parse_failures: metadata.parse_failures,
             skipped_inputs: metadata.skipped_inputs,
+            risk_tier,
         },
         workspaces: metadata.workspaces,
         roots: metadata.root_impacts,

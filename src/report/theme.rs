@@ -4,13 +4,7 @@ use figlet_rs::FIGlet;
 
 const LAYOUT_WIDTH: usize = 60;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum RiskTier {
-    Minor,
-    Moderate,
-    Risky,
-    High,
-}
+pub(super) use crate::graph::RiskTier;
 
 /// `(label, foreground code, pill code)` for a tier — a green→red gradient.
 pub(super) fn tier_palette(tier: RiskTier) -> (&'static str, &'static str, &'static str) {

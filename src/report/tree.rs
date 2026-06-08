@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::graph::{
-    AnalysisResult, AnalysisTarget, GraphNode, NodeKind, RootImpact, Workspace, package_key,
+    AnalysisResult, AnalysisTarget, GraphNode, NodeKind, RootImpact, Workspace, compute_tier,
+    package_key,
 };
 
 use super::theme::{RiskTier, Theme};
@@ -178,7 +179,7 @@ fn assess(result: &AnalysisResult) -> Assessment {
     let ambiguous = result.edges.iter().filter(|edge| edge.is_ambiguous).count();
 
     Assessment {
-        tier: compute_tier(affected, packages),
+        tier: result.summary.risk_tier,
         affected,
         packages,
         leaves,
@@ -188,22 +189,6 @@ fn assess(result: &AnalysisResult) -> Assessment {
         // path — they're a repo-wide blind spot that may hide extra consumers.
         unresolved: result.summary.unresolved_imports,
         parse_failures: result.summary.parse_failures,
-    }
-}
-
-/// Reach and spread drive the tier; ambiguity is surfaced as a confidence
-/// caveat rather than inflating the score, so the headline stays trustworthy.
-fn compute_tier(affected: usize, packages: usize) -> RiskTier {
-    if affected == 0 {
-        RiskTier::Minor
-    } else if affected > 25 || packages >= 3 {
-        RiskTier::High
-    } else if affected <= 3 && packages <= 1 {
-        RiskTier::Minor
-    } else if affected <= 10 && packages <= 2 {
-        RiskTier::Moderate
-    } else {
-        RiskTier::Risky
     }
 }
 

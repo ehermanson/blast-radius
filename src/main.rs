@@ -15,9 +15,13 @@ fn main() -> Result<ExitCode> {
         println!("{output}");
     }
 
-    if let Some(threshold) = app.fail_threshold
-        && result.summary.total_affected_files > threshold
-    {
+    let over_threshold = app
+        .fail_threshold
+        .is_some_and(|threshold| result.summary.total_affected_files > threshold);
+    let over_risk = app
+        .fail_on_risk
+        .is_some_and(|tier| result.summary.risk_tier >= tier);
+    if over_threshold || over_risk {
         return Ok(ExitCode::from(2));
     }
 
