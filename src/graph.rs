@@ -93,6 +93,9 @@ pub struct Summary {
     pub unresolved_imports: usize,
     pub ambiguous_edges: usize,
     pub parse_failures: usize,
+    /// Input paths passed to `files` mode that were skipped because they were
+    /// missing on disk or not recognized source files.
+    pub skipped_inputs: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]

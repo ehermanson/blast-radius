@@ -92,6 +92,7 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
                 warnings,
                 parse_failures,
                 unresolved_imports,
+                0,
                 vec![(file, exports)],
             )
         }
@@ -113,23 +114,44 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
                 warnings,
                 parse_failures,
                 unresolved_imports,
+                0,
                 vec![(file, exports)],
             )
         }
         Command::Files { files } => {
             let mut roots = Vec::new();
             let mut normalized = Vec::new();
+            let mut skipped_inputs = 0;
+            // `files` mode is the entry point hook managers (lint-staged, Husky,
+            // Lefthook) pipe changed paths into. Those batches can include
+            // deleted/renamed files and non-source paths, so skip-and-warn on
+            // anything we can't analyze rather than failing the whole run.
             for file in files {
-                let file = normalize_input_path(&context.repo_root, file)?;
+                let input = file.display().to_string();
+                let Ok(file) = normalize_input_path(&context.repo_root, file) else {
+                    skipped_inputs += 1;
+                    warnings.push(format!("skipped input {input}: not found on disk"));
+                    continue;
+                };
                 if !modules.contains_key(&file) {
-                    bail!(
-                        "source file not found in repository index: {}",
-                        file.display()
-                    );
+                    skipped_inputs += 1;
+                    warnings.push(format!(
+                        "skipped input {}: not a recognized source file",
+                        relative_label(&context.repo_root, &file)
+                    ));
+                    continue;
                 }
                 let exports = file_root_exports(&file, &module_states);
                 roots.push((file.clone(), exports));
                 normalized.push(file);
+            }
+
+            if normalized.is_empty() {
+                warnings.push(format!(
+                    "no recognized source files among {} input path{}",
+                    files.len(),
+                    if files.len() == 1 { "" } else { "s" }
+                ));
             }
 
             analyze_from_roots(
@@ -139,6 +161,7 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
                 warnings,
                 parse_failures,
                 unresolved_imports,
+                skipped_inputs,
                 roots,
             )
         }
@@ -221,6 +244,7 @@ fn analyze_from_roots(
     mut warnings: Vec<String>,
     parse_failures: usize,
     unresolved_imports: usize,
+    skipped_inputs: usize,
     roots: Vec<(PathBuf, BTreeSet<String>)>,
 ) -> Result<AnalysisResult> {
     let ambiguous_edges = data
@@ -279,6 +303,7 @@ fn analyze_from_roots(
         parse_failures,
         unresolved_imports,
         ambiguous_edges,
+        skipped_inputs,
         workspaces,
         root_impacts,
     };

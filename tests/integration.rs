@@ -307,6 +307,77 @@ fn files_mode_deduplicates_overlapping_multi_root_impact() {
 }
 
 #[test]
+fn files_mode_skips_unknown_inputs_and_analyzes_the_rest() {
+    let repo = tempdir().unwrap();
+    fs::create_dir_all(repo.path().join("src")).unwrap();
+    fs::write(repo.path().join("src/source-a.ts"), "export const a = 1;\n").unwrap();
+    fs::write(repo.path().join("src/source-b.ts"), "export const b = 2;\n").unwrap();
+    fs::write(
+        repo.path().join("src/app.ts"),
+        "import { a } from './source-a';\nimport { b } from './source-b';\nexport const value = a + b;\n",
+    )
+    .unwrap();
+    // Exists on disk but is not a parsed source module.
+    fs::write(repo.path().join("src/styles.css"), ".x { color: red; }\n").unwrap();
+
+    // A hook batch can mix valid sources with a deleted/renamed path and a
+    // non-source file; the valid inputs must still be analyzed.
+    let json = run_json(
+        repo.path(),
+        &[
+            "files",
+            "src/source-a.ts",
+            "src/does-not-exist.ts",
+            "src/styles.css",
+            "src/source-b.ts",
+        ],
+    );
+
+    let labels = node_labels(&json);
+    assert_eq!(label_count(&labels, "src/app.ts"), 1);
+    assert_eq!(json["roots"].as_array().unwrap().len(), 2);
+    assert_eq!(json["summary"]["total_affected_files"].as_u64().unwrap(), 3);
+    assert_eq!(json["summary"]["skipped_inputs"].as_u64().unwrap(), 2);
+
+    let warnings = json["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|warning| warning.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(warnings.contains("src/does-not-exist.ts"));
+    assert!(warnings.contains("not found on disk"));
+    assert!(warnings.contains("styles.css"));
+    assert!(warnings.contains("not a recognized source file"));
+}
+
+#[test]
+fn files_mode_with_all_unknown_inputs_reports_empty_with_warnings() {
+    let repo = tempdir().unwrap();
+    fs::create_dir_all(repo.path().join("src")).unwrap();
+    fs::write(repo.path().join("src/real.ts"), "export const x = 1;\n").unwrap();
+    fs::write(repo.path().join("src/styles.css"), ".x { color: red; }\n").unwrap();
+
+    // Every passed path is unanalyzable: the run succeeds with an empty radius
+    // rather than erroring, so a hook never fails the commit over input shape.
+    let json = run_json(repo.path(), &["files", "src/gone.ts", "src/styles.css"]);
+
+    assert_eq!(json["summary"]["total_affected_files"].as_u64().unwrap(), 0);
+    assert_eq!(json["summary"]["skipped_inputs"].as_u64().unwrap(), 2);
+    assert!(json["roots"].as_array().unwrap().is_empty());
+
+    let warnings = json["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|warning| warning.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(warnings.contains("no recognized source files among 2 input paths"));
+}
+
+#[test]
 fn file_mode_reports_tree_output() {
     let repo = setup_repo();
 

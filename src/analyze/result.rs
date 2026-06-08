@@ -17,6 +17,7 @@ pub(super) struct ResultMetadata {
     pub(super) parse_failures: usize,
     pub(super) unresolved_imports: usize,
     pub(super) ambiguous_edges: usize,
+    pub(super) skipped_inputs: usize,
     pub(super) workspaces: Vec<Workspace>,
     pub(super) root_impacts: Vec<RootImpact>,
 }
@@ -98,6 +99,7 @@ pub(super) fn build_result(
             unresolved_imports: metadata.unresolved_imports,
             ambiguous_edges: metadata.ambiguous_edges,
             parse_failures: metadata.parse_failures,
+            skipped_inputs: metadata.skipped_inputs,
         },
         workspaces: metadata.workspaces,
         roots: metadata.root_impacts,

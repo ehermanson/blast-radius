@@ -97,6 +97,7 @@ make quality-java
 - `parse_failures`
 - `unresolved_imports`
 - `ambiguous_edges`
+- `skipped_inputs` (paths passed to `files` mode that were not analyzable)
 - `total_affected_files` for known regression targets
 - runtime on `monorepo-demo`, `vite-react-ts`, and `chakra-ui`
 - runtime on optional language fixtures when their features are enabled
