@@ -98,7 +98,7 @@ file types were compiled into it.
 
 ## Output Formats
 
-- `tree` — leads with a risk verdict and meter, then (for multi-file diffs) a per-changed-file breakdown, then the impacted files listed in full and grouped by package, with endpoints flagged. Pass `--verbose` (`-v`) for the full root → cascade tree. The per-file breakdown is also available in `json` as the `roots` array.
+- `tree` — leads with a risk verdict and meter, then (for multi-file runs) a per-input-file breakdown, then the impacted files listed in full and grouped by package, with endpoints flagged. Pass `--verbose` (`-v`) for the full root → cascade tree. The per-file breakdown is also available in `json` as the `roots` array.
 - `json`
 - `mermaid`
 - `dot`

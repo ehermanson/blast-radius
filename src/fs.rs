@@ -16,6 +16,7 @@ pub struct RepoContext {
     pub source_files: Vec<PathBuf>,
     pub tsconfigs: Vec<TsConfigPath>,
     pub package_jsons: Vec<PathBuf>,
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -47,6 +48,7 @@ impl RepoContext {
         let mut source_files = Vec::new();
         let mut tsconfigs = Vec::new();
         let mut package_jsons = Vec::new();
+        let mut warnings = Vec::new();
 
         let walker = WalkBuilder::new(&repo_root)
             .hidden(false)
@@ -71,8 +73,9 @@ impl RepoContext {
             let path = entry.into_path();
             match path.file_name().and_then(|name| name.to_str()) {
                 Some("tsconfig.json") => {
-                    if let Ok(config) = load_tsconfig(&path) {
-                        tsconfigs.push(config);
+                    match load_tsconfig(&path) {
+                        Ok(config) => tsconfigs.push(config),
+                        Err(error) => warnings.push(format!("{error:#}")),
                     }
                 }
                 Some("package.json") => package_jsons.push(path.clone()),
@@ -93,6 +96,7 @@ impl RepoContext {
             source_files,
             tsconfigs,
             package_jsons,
+            warnings,
         })
     }
 }
@@ -267,6 +271,29 @@ mod tests {
         assert_eq!(repo.source_files.len(), expected);
         assert_eq!(repo.tsconfigs.len(), 1);
         assert_eq!(repo.package_jsons.len(), 1);
+    }
+
+    #[test]
+    fn reports_invalid_tsconfig_as_warning() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::write(dir.path().join("tsconfig.json"), "{ invalid json").unwrap();
+        fs::write(
+            dir.path().join("src").join("Button.tsx"),
+            "export const Button = () => null;",
+        )
+        .unwrap();
+
+        let repo = RepoContext::discover(dir.path()).unwrap();
+
+        assert_eq!(repo.source_files.len(), 1);
+        assert!(repo.tsconfigs.is_empty());
+        assert!(
+            repo.warnings
+                .iter()
+                .any(|warning| warning.contains("failed to parse tsconfig")),
+            "invalid tsconfig should be reported as a discovery warning"
+        );
     }
 
     #[cfg(feature = "python")]
