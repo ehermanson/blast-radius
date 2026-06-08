@@ -1,8 +1,8 @@
 [package]
 name = "blast-radius"
 version = "0.1.0"
-edition = "2024"
-description = "Analyze the transitive blast radius of frontend code changes."
+edition = "2026"
+description = "Analyze the transitive blast radius of code changes."
 license = "MIT"
 repository = "https://github.com/ehermanson/blast-radius"
 # Keep the published crate small: example repos (incl. large vendored snapshots),
