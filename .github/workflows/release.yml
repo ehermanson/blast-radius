@@ -120,7 +120,7 @@ jobs:
           Compress-Archive -Path staging/* -DestinationPath $archive
           Get-FileHash $archive -Algorithm SHA256
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.target }}
           path: |
