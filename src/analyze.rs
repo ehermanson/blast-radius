@@ -94,6 +94,14 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
                     file.display()
                 );
             }
+            validate_export_name(
+                &file,
+                export_name,
+                &modules,
+                &module_states,
+                &context.repo_root,
+                &mut warnings,
+            )?;
             let exports =
                 expanded_exports_for_root(&file, std::slice::from_ref(export_name), &module_states);
 
@@ -145,6 +153,7 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
             // Lefthook) pipe changed paths into. Those batches can include
             // deleted/renamed files and non-source paths, so skip-and-warn on
             // anything we can't analyze rather than failing the whole run.
+            let mut seen = BTreeSet::new();
             for file in files {
                 let input = file.display().to_string();
                 let Ok(file) = normalize_input_path(&context.repo_root, file) else {
@@ -152,6 +161,9 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
                     warnings.push(format!("skipped input {input}: not found on disk"));
                     continue;
                 };
+                if !seen.insert(file.clone()) {
+                    continue;
+                }
                 if !modules.contains_key(&file) {
                     skipped_inputs += 1;
                     warnings.push(format!(
@@ -187,6 +199,59 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
             )
         }
     }
+}
+
+/// Reject an export name the target file provably does not expose. When the
+/// file's exports are not statically enumerable (star re-exports, whole-module
+/// CommonJS assignment, or no parsed exports at all), proceed with a warning
+/// instead of failing the run.
+fn validate_export_name(
+    file: &Path,
+    export_name: &str,
+    modules: &BTreeMap<PathBuf, ModuleFacts>,
+    module_states: &BTreeMap<PathBuf, ModuleState>,
+    repo_root: &Path,
+    warnings: &mut Vec<String>,
+) -> Result<()> {
+    let known = module_states.get(file).map(|state| &state.public_exports);
+    if known.is_some_and(|exports| exports.contains(export_name)) {
+        return Ok(());
+    }
+
+    let module = modules.get(file);
+    let has_star_reexport = module.is_some_and(|module| {
+        module
+            .reexports
+            .iter()
+            .any(|reexport| matches!(reexport.imported, ReexportTarget::All))
+    });
+    let has_opaque_commonjs = module.is_some_and(|module| {
+        module
+            .exports
+            .iter()
+            .any(|export| export.kind == ExportKind::CommonJs && export.local.is_none())
+    });
+    let enumerable = known.is_some_and(|exports| !exports.is_empty());
+
+    if has_star_reexport || has_opaque_commonjs || !enumerable {
+        warnings.push(format!(
+            "export '{export_name}' is not a statically-known export of {}; \
+             continuing because the file's exports are not fully enumerable",
+            relative_label(repo_root, file)
+        ));
+        return Ok(());
+    }
+
+    let available = known
+        .into_iter()
+        .flatten()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join(", ");
+    bail!(
+        "export '{export_name}' not found in {}; available exports: {available}",
+        relative_label(repo_root, file)
+    );
 }
 
 fn file_root_exports(
