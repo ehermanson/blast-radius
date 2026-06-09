@@ -58,8 +58,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--output` files are always written without ANSI escape codes.
 - Documented the Ruby adapter's require-only limitation (Rails/Zeitwerk
   autoloading is not modeled).
-- CI hardened: lint (fmt + clippy), MSRV, and combined all-features jobs;
-  duplicate push/PR runs eliminated.
+- CI hardened: lint (fmt + clippy), MSRV, Windows, and combined all-features
+  jobs; duplicate push/PR runs eliminated.
+- MSRV raised to 1.88 (transitive dependencies require it — `icu`/`idna` need
+  1.86 and `ar_archive_writer` uses 1.88 let-chains; the previously declared
+  1.85 never actually compiled).
+- JSON node ids and edge `from`/`to` paths use `/` separators on all
+  platforms.
 
 ## [0.1.1] - 2026-06-09
 
