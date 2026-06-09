@@ -4,7 +4,7 @@ use tempfile::tempdir;
 
 use crate::fs::RepoContext;
 
-use super::{Resolution, Resolver};
+use super::{Resolution, Resolver, match_alias};
 
 #[test]
 fn resolves_tsconfig_aliases_and_workspace_packages() {
@@ -313,6 +313,395 @@ fn resolves_multi_dot_basenames() {
         resolver.resolve(&importer, "./routeTree.gen"),
         Resolution::Resolved(path) if path.ends_with("src/routeTree.gen.ts")
     ));
+}
+
+#[test]
+fn multi_dot_specifier_wins_over_extension_replacement() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("src")).unwrap();
+    fs::write(dir.path().join("package.json"), r#"{"name":"fixture"}"#).unwrap();
+    fs::write(
+        dir.path().join("src/App.tsx"),
+        "import './recipe.types'; import './recipe';",
+    )
+    .unwrap();
+    // Both the multi-dot module and a sibling sharing its stem exist; the
+    // appended form must win over extension replacement.
+    fs::write(dir.path().join("src/recipe.ts"), "export const recipe = 1;").unwrap();
+    fs::write(
+        dir.path().join("src/recipe.types.ts"),
+        "export type Recipe = {};",
+    )
+    .unwrap();
+
+    let context = RepoContext::discover(dir.path()).unwrap();
+    let resolver = Resolver::new(&context).unwrap();
+    let importer = dir.path().join("src/App.tsx");
+
+    assert!(matches!(
+        resolver.resolve(&importer, "./recipe.types"),
+        Resolution::Resolved(path) if path.ends_with("src/recipe.types.ts")
+    ));
+    assert!(matches!(
+        resolver.resolve(&importer, "./recipe"),
+        Resolution::Resolved(path) if path.ends_with("src/recipe.ts")
+    ));
+}
+
+#[test]
+fn asset_imports_do_not_resolve_via_extension_replacement() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("src")).unwrap();
+    fs::write(dir.path().join("package.json"), r#"{"name":"fixture"}"#).unwrap();
+    fs::write(
+        dir.path().join("src/App.tsx"),
+        "import './theme.css'; import { theme } from './theme.js';",
+    )
+    .unwrap();
+    fs::write(dir.path().join("src/theme.ts"), "export const theme = {};").unwrap();
+
+    let context = RepoContext::discover(dir.path()).unwrap();
+    let resolver = Resolver::new(&context).unwrap();
+    let importer = dir.path().join("src/App.tsx");
+
+    // A css asset must stay unresolved instead of hitting theme.ts; only
+    // JS-emitted extensions are rewritten to their TS counterparts.
+    assert!(matches!(
+        resolver.resolve(&importer, "./theme.css"),
+        Resolution::Unresolved
+    ));
+    assert!(matches!(
+        resolver.resolve(&importer, "./theme.js"),
+        Resolution::Resolved(path) if path.ends_with("src/theme.ts")
+    ));
+}
+
+#[test]
+fn resolves_declaration_only_modules() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("src/models")).unwrap();
+    fs::write(dir.path().join("package.json"), r#"{"name":"fixture"}"#).unwrap();
+    fs::write(
+        dir.path().join("src/App.tsx"),
+        "import './types'; import './models'; import './legacy.js';",
+    )
+    .unwrap();
+    fs::write(dir.path().join("src/types.d.ts"), "export type T = {};").unwrap();
+    fs::write(
+        dir.path().join("src/models/index.d.ts"),
+        "export type M = {};",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("src/legacy.d.ts"),
+        "export const legacy: 1;",
+    )
+    .unwrap();
+
+    let context = RepoContext::discover(dir.path()).unwrap();
+    let resolver = Resolver::new(&context).unwrap();
+    let importer = dir.path().join("src/App.tsx");
+
+    assert!(matches!(
+        resolver.resolve(&importer, "./types"),
+        Resolution::Resolved(path) if path.ends_with("src/types.d.ts")
+    ));
+    assert!(matches!(
+        resolver.resolve(&importer, "./models"),
+        Resolution::Resolved(path) if path.ends_with("src/models/index.d.ts")
+    ));
+    assert!(matches!(
+        resolver.resolve(&importer, "./legacy.js"),
+        Resolution::Resolved(path) if path.ends_with("src/legacy.d.ts")
+    ));
+}
+
+#[test]
+fn follows_tsconfig_extends_for_paths_anchored_to_declaring_config() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("packages/ui/src")).unwrap();
+    fs::create_dir_all(dir.path().join("apps/web/src")).unwrap();
+    // Nx layout: paths live in the root base config (no baseUrl); the project
+    // config only extends it. Targets must anchor to the base config's dir.
+    fs::write(
+        dir.path().join("tsconfig.base.json"),
+        r#"{"compilerOptions":{"paths":{"@ui/*":["packages/ui/src/*"]}}}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("apps/web/tsconfig.json"),
+        r#"{"extends":"../../tsconfig.base.json"}"#,
+    )
+    .unwrap();
+    fs::write(dir.path().join("package.json"), r#"{"name":"fixture"}"#).unwrap();
+    fs::write(
+        dir.path().join("packages/ui/src/Button.tsx"),
+        "export const Button = () => null;",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("apps/web/src/App.tsx"),
+        "import { Button } from '@ui/Button';",
+    )
+    .unwrap();
+
+    let context = RepoContext::discover(dir.path()).unwrap();
+    let resolver = Resolver::new(&context).unwrap();
+    let importer = dir.path().join("apps/web/src/App.tsx");
+
+    assert!(matches!(
+        resolver.resolve(&importer, "@ui/Button"),
+        Resolution::Resolved(path) if path.ends_with("packages/ui/src/Button.tsx")
+    ));
+    assert!(resolver.is_internal_specifier(&importer, "@ui/Button"));
+}
+
+#[test]
+fn child_paths_replace_extended_parent_paths_wholesale() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("packages/ui/src")).unwrap();
+    fs::create_dir_all(dir.path().join("apps/web/src")).unwrap();
+    fs::create_dir_all(dir.path().join("old")).unwrap();
+    fs::write(
+        dir.path().join("tsconfig.base.json"),
+        r#"{"compilerOptions":{"baseUrl":".","paths":{"@old/*":["old/*"]}}}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("apps/web/tsconfig.json"),
+        r#"{"extends":"../../tsconfig.base.json","compilerOptions":{"paths":{"@new/*":["packages/ui/src/*"]}}}"#,
+    )
+    .unwrap();
+    fs::write(dir.path().join("package.json"), r#"{"name":"fixture"}"#).unwrap();
+    fs::write(dir.path().join("old/legacy.ts"), "export const legacy = 1;").unwrap();
+    fs::write(
+        dir.path().join("packages/ui/src/Button.tsx"),
+        "export const Button = () => null;",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("apps/web/src/App.tsx"),
+        "import { Button } from '@new/Button'; import { legacy } from '@old/legacy';",
+    )
+    .unwrap();
+
+    let context = RepoContext::discover(dir.path()).unwrap();
+    let resolver = Resolver::new(&context).unwrap();
+    let importer = dir.path().join("apps/web/src/App.tsx");
+
+    // Child paths anchor to the inherited baseUrl (base config's dir) and
+    // replace the parent's paths wholesale, so @old no longer matches.
+    assert!(matches!(
+        resolver.resolve(&importer, "@new/Button"),
+        Resolution::Resolved(path) if path.ends_with("packages/ui/src/Button.tsx")
+    ));
+    assert!(matches!(
+        resolver.resolve(&importer, "@old/legacy"),
+        Resolution::Unresolved
+    ));
+}
+
+#[test]
+fn skips_bare_package_extends_in_array_form() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("packages/ui/src")).unwrap();
+    fs::create_dir_all(dir.path().join("apps/web/src")).unwrap();
+    fs::write(
+        dir.path().join("tsconfig.json"),
+        r#"{"extends":["@tsconfig/node18","./tsconfig.base"]}"#,
+    )
+    .unwrap();
+    // Specifier above omits .json; loading must append it like TypeScript does.
+    fs::write(
+        dir.path().join("tsconfig.base.json"),
+        r#"{"compilerOptions":{"baseUrl":".","paths":{"@ui/*":["packages/ui/src/*"]}}}"#,
+    )
+    .unwrap();
+    fs::write(dir.path().join("package.json"), r#"{"name":"fixture"}"#).unwrap();
+    fs::write(
+        dir.path().join("packages/ui/src/Button.tsx"),
+        "export const Button = () => null;",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("apps/web/src/App.tsx"),
+        "import { Button } from '@ui/Button';",
+    )
+    .unwrap();
+
+    let context = RepoContext::discover(dir.path()).unwrap();
+    let resolver = Resolver::new(&context).unwrap();
+    let importer = dir.path().join("apps/web/src/App.tsx");
+
+    assert!(matches!(
+        resolver.resolve(&importer, "@ui/Button"),
+        Resolution::Resolved(path) if path.ends_with("packages/ui/src/Button.tsx")
+    ));
+}
+
+#[test]
+fn tsconfig_extends_cycle_is_tolerated() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("src")).unwrap();
+    fs::write(
+        dir.path().join("tsconfig.json"),
+        r#"{"extends":"./tsconfig.base.json"}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("tsconfig.base.json"),
+        r#"{"extends":"./tsconfig.json"}"#,
+    )
+    .unwrap();
+    fs::write(dir.path().join("package.json"), r#"{"name":"fixture"}"#).unwrap();
+    fs::write(dir.path().join("src/App.tsx"), "import './util';").unwrap();
+    fs::write(dir.path().join("src/util.ts"), "export const util = 1;").unwrap();
+
+    let context = RepoContext::discover(dir.path()).unwrap();
+    let resolver = Resolver::new(&context).unwrap();
+    let importer = dir.path().join("src/App.tsx");
+
+    assert!(matches!(
+        resolver.resolve(&importer, "./util"),
+        Resolution::Resolved(path) if path.ends_with("src/util.ts")
+    ));
+}
+
+#[test]
+fn discovers_alias_bearing_sibling_tsconfig() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("packages/ui/src")).unwrap();
+    fs::create_dir_all(dir.path().join("apps/web/src")).unwrap();
+    // Vite scaffold: tsconfig.json only carries references; the aliases live in
+    // a sibling config that nothing extends.
+    fs::write(dir.path().join("tsconfig.json"), r#"{"files":[]}"#).unwrap();
+    fs::write(
+        dir.path().join("tsconfig.app.json"),
+        r#"{"compilerOptions":{"baseUrl":".","paths":{"@ui/*":["packages/ui/src/*"]}}}"#,
+    )
+    .unwrap();
+    fs::write(dir.path().join("package.json"), r#"{"name":"fixture"}"#).unwrap();
+    fs::write(
+        dir.path().join("packages/ui/src/Button.tsx"),
+        "export const Button = () => null;",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("apps/web/src/App.tsx"),
+        "import { Button } from '@ui/Button';",
+    )
+    .unwrap();
+
+    let context = RepoContext::discover(dir.path()).unwrap();
+    let resolver = Resolver::new(&context).unwrap();
+    let importer = dir.path().join("apps/web/src/App.tsx");
+
+    assert!(matches!(
+        resolver.resolve(&importer, "@ui/Button"),
+        Resolution::Resolved(path) if path.ends_with("packages/ui/src/Button.tsx")
+    ));
+}
+
+#[test]
+fn aliasless_nested_tsconfig_does_not_shadow_root_aliases() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("packages/ui/src")).unwrap();
+    fs::create_dir_all(dir.path().join("apps/web/src")).unwrap();
+    fs::write(
+        dir.path().join("tsconfig.json"),
+        r#"{"compilerOptions":{"baseUrl":".","paths":{"@ui/*":["packages/ui/src/*"]}}}"#,
+    )
+    .unwrap();
+    // The nearer config declares no paths/baseUrl and must not shadow the root.
+    fs::write(
+        dir.path().join("apps/web/tsconfig.json"),
+        r#"{"compilerOptions":{"strict":true}}"#,
+    )
+    .unwrap();
+    fs::write(dir.path().join("package.json"), r#"{"name":"fixture"}"#).unwrap();
+    fs::write(
+        dir.path().join("packages/ui/src/Button.tsx"),
+        "export const Button = () => null;",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("apps/web/src/App.tsx"),
+        "import { Button } from '@ui/Button';",
+    )
+    .unwrap();
+
+    let context = RepoContext::discover(dir.path()).unwrap();
+    let resolver = Resolver::new(&context).unwrap();
+    let importer = dir.path().join("apps/web/src/App.tsx");
+
+    assert!(matches!(
+        resolver.resolve(&importer, "@ui/Button"),
+        Resolution::Resolved(path) if path.ends_with("packages/ui/src/Button.tsx")
+    ));
+}
+
+#[test]
+fn overlapping_wildcard_alias_is_no_match() {
+    assert_eq!(match_alias("lib/*/lib", "lib/lib"), None);
+    assert_eq!(
+        match_alias("lib/*/lib", "lib/x/lib"),
+        Some(vec!["x".to_string()])
+    );
+}
+
+#[test]
+fn overlapping_wildcard_alias_does_not_panic_during_resolution() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("src")).unwrap();
+    fs::write(
+        dir.path().join("tsconfig.json"),
+        r#"{"compilerOptions":{"baseUrl":".","paths":{"lib/*/lib":["src/*/lib"]}}}"#,
+    )
+    .unwrap();
+    fs::write(dir.path().join("package.json"), r#"{"name":"fixture"}"#).unwrap();
+    fs::write(dir.path().join("src/App.tsx"), "import 'lib/lib';").unwrap();
+
+    let context = RepoContext::discover(dir.path()).unwrap();
+    let resolver = Resolver::new(&context).unwrap();
+    let importer = dir.path().join("src/App.tsx");
+
+    // Prefix and suffix overlap in the specifier; previously this sliced out of
+    // bounds and panicked.
+    assert!(matches!(
+        resolver.resolve(&importer, "lib/lib"),
+        Resolution::Unresolved
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn unreadable_directory_is_skipped_with_warning() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("src")).unwrap();
+    fs::create_dir_all(dir.path().join("locked")).unwrap();
+    fs::write(
+        dir.path().join("src/App.tsx"),
+        "export const App = () => null;",
+    )
+    .unwrap();
+    let locked = dir.path().join("locked");
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+
+    let context = RepoContext::discover(dir.path());
+
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+    let context = context.unwrap();
+
+    assert_eq!(context.source_files.len(), 1);
+    assert!(
+        context
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("skipping unreadable path")),
+        "unreadable directory should surface as a discovery warning"
+    );
 }
 
 #[cfg(feature = "python")]

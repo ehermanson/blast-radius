@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -41,18 +41,39 @@ pub struct TsConfigPath {
     pub compiler_options: TsCompilerOptions,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+/// Compiler options after following `extends` chains. Directory-relative
+/// fields are resolved against the config file that declared them, so the
+/// merged result is anchored to absolute directories.
+#[derive(Debug, Clone, Default)]
 pub struct TsCompilerOptions {
-    #[serde(default, rename = "baseUrl")]
-    pub base_url: Option<String>,
-    #[serde(default)]
+    /// Absolute directory `baseUrl` points at, when declared.
+    pub base_dir: Option<PathBuf>,
     pub paths: BTreeMap<String, Vec<String>>,
+    /// Absolute directory relative `paths` targets resolve against when no
+    /// `baseUrl` is in effect: the directory of the config declaring `paths`.
+    pub paths_dir: Option<PathBuf>,
 }
 
-#[derive(Debug, Deserialize)]
+impl TsCompilerOptions {
+    pub fn has_aliases(&self) -> bool {
+        self.base_dir.is_some() || !self.paths.is_empty()
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
 struct TsConfigFile {
+    #[serde(default)]
+    extends: Option<serde_json::Value>,
     #[serde(default, rename = "compilerOptions")]
-    compiler_options: TsCompilerOptions,
+    compiler_options: RawCompilerOptions,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RawCompilerOptions {
+    #[serde(default, rename = "baseUrl")]
+    base_url: Option<String>,
+    #[serde(default)]
+    paths: Option<BTreeMap<String, Vec<String>>>,
 }
 
 impl RepoContext {
@@ -89,7 +110,13 @@ impl RepoContext {
             .build();
 
         for entry in walker {
-            let entry = entry?;
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) => {
+                    warnings.push(format!("skipping unreadable path: {error}"));
+                    continue;
+                }
+            };
             if !entry.file_type().is_some_and(|kind| kind.is_file()) {
                 continue;
             }
@@ -97,7 +124,15 @@ impl RepoContext {
             let path = entry.into_path();
             match path.file_name().and_then(|name| name.to_str()) {
                 Some("tsconfig.json") => match load_tsconfig(&path) {
-                    Ok(config) => tsconfigs.push(config),
+                    Ok(config) => {
+                        // Nx/Vite scaffolds keep aliases in a sibling config the
+                        // tsconfig.json only references; pull those in when the
+                        // merged options carry no aliases of their own.
+                        if !config.compiler_options.has_aliases() {
+                            tsconfigs.extend(load_sibling_tsconfigs(&path, &mut warnings));
+                        }
+                        tsconfigs.push(config);
+                    }
                     Err(error) => warnings.push(format!("{error:#}")),
                 },
                 Some("package.json") => package_jsons.push(path.clone()),
@@ -157,6 +192,22 @@ fn load_project_config(repo_root: &Path) -> Result<ProjectConfig> {
 }
 
 fn load_tsconfig(path: &Path) -> Result<TsConfigPath> {
+    let mut visited = HashSet::new();
+    Ok(TsConfigPath {
+        path: path.to_path_buf(),
+        compiler_options: load_tsconfig_options(path, &mut visited)?,
+    })
+}
+
+/// Load a config's options after following its `extends` chain. Child fields
+/// shallow-override parents; `paths` replaces wholesale when redeclared.
+fn load_tsconfig_options(path: &Path, visited: &mut HashSet<PathBuf>) -> Result<TsCompilerOptions> {
+    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    if !visited.insert(canonical) {
+        // `extends` cycle: treat the revisited config as empty.
+        return Ok(TsCompilerOptions::default());
+    }
+
     let contents = fs::read_to_string(path)
         .with_context(|| format!("failed to read tsconfig {}", path.display()))?;
     let value: serde_json::Value = parse_to_serde_value(
@@ -174,10 +225,87 @@ fn load_tsconfig(path: &Path) -> Result<TsConfigPath> {
     .with_context(|| format!("failed to parse tsconfig {}", path.display()))?;
     let parsed: TsConfigFile = serde_json::from_value(value)
         .with_context(|| format!("failed to decode tsconfig {}", path.display()))?;
-    Ok(TsConfigPath {
-        path: path.to_path_buf(),
-        compiler_options: parsed.compiler_options,
-    })
+
+    let dir = path.parent().unwrap_or(Path::new("."));
+    let mut merged = TsCompilerOptions::default();
+    for specifier in extends_specifiers(&parsed.extends) {
+        // Bare package specifiers (e.g. @tsconfig/node18) live in node_modules,
+        // which isn't indexed; skip them silently.
+        let Some(parent_path) = resolve_extends_target(dir, &specifier) else {
+            continue;
+        };
+        let parent = load_tsconfig_options(&parent_path, visited)
+            .with_context(|| format!("failed to load extended tsconfig from {}", path.display()))?;
+        if parent.base_dir.is_some() {
+            merged.base_dir = parent.base_dir;
+        }
+        if parent.paths_dir.is_some() {
+            merged.paths = parent.paths;
+            merged.paths_dir = parent.paths_dir;
+        }
+    }
+
+    if let Some(base_url) = parsed.compiler_options.base_url {
+        merged.base_dir = Some(crate::resolve::clean_path(&dir.join(base_url)));
+    }
+    if let Some(paths) = parsed.compiler_options.paths {
+        merged.paths = paths;
+        merged.paths_dir = Some(dir.to_path_buf());
+    }
+
+    Ok(merged)
+}
+
+fn extends_specifiers(value: &Option<serde_json::Value>) -> Vec<String> {
+    match value {
+        Some(serde_json::Value::String(specifier)) => vec![specifier.clone()],
+        Some(serde_json::Value::Array(items)) => items
+            .iter()
+            .filter_map(|item| item.as_str().map(str::to_string))
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Map an `extends` specifier to a config file on disk: `./`/`../` specifiers
+/// and plain sibling filenames resolve relative to `dir` (with `.json` appended
+/// when missing, as TypeScript does); anything else is a package specifier.
+fn resolve_extends_target(dir: &Path, specifier: &str) -> Option<PathBuf> {
+    let candidate = dir.join(specifier);
+    if candidate.is_file() {
+        return Some(candidate);
+    }
+    if !specifier.ends_with(".json") {
+        let mut with_json = candidate.into_os_string();
+        with_json.push(".json");
+        let with_json = PathBuf::from(with_json);
+        if with_json.is_file() {
+            return Some(with_json);
+        }
+    }
+    None
+}
+
+/// Probe well-known sibling configs that hold path aliases in Nx and Vite
+/// scaffold layouts, where tsconfig.json itself declares none.
+fn load_sibling_tsconfigs(tsconfig: &Path, warnings: &mut Vec<String>) -> Vec<TsConfigPath> {
+    let Some(dir) = tsconfig.parent() else {
+        return Vec::new();
+    };
+
+    let mut configs = Vec::new();
+    for name in ["tsconfig.base.json", "tsconfig.app.json"] {
+        let path = dir.join(name);
+        if !path.is_file() {
+            continue;
+        }
+        match load_tsconfig(&path) {
+            Ok(config) if config.compiler_options.has_aliases() => configs.push(config),
+            Ok(_) => {}
+            Err(error) => warnings.push(format!("{error:#}")),
+        }
+    }
+    configs
 }
 
 fn is_source_file(path: &Path) -> bool {

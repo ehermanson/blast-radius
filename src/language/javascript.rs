@@ -6,7 +6,7 @@ use anyhow::Result;
 use crate::fs::TsConfigPath;
 use crate::parse::{ModuleFacts, parse_javascript_module};
 use crate::resolve::{
-    Resolution, ResolveCtx, apply_alias_target, clean_path, match_alias, package_specifier_parts,
+    Resolution, ResolveCtx, apply_alias_target, match_alias, package_specifier_parts,
     resolve_package_export, resolve_package_import,
 };
 
@@ -111,13 +111,14 @@ pub(super) fn is_internal_javascript_specifier(
 
 fn resolve_tsconfig_alias(ctx: &ResolveCtx, importer: &Path, specifier: &str) -> Option<PathBuf> {
     let tsconfig = nearest_tsconfig(ctx, importer)?;
-    let tsconfig_dir = tsconfig.path.parent()?;
+    // Targets resolve against baseUrl when set, else against the config file
+    // that declared the paths (which may be an extended parent).
     let base_dir = tsconfig
         .compiler_options
-        .base_url
-        .as_ref()
-        .map(|base| clean_path(&tsconfig_dir.join(base)))
-        .unwrap_or_else(|| tsconfig_dir.to_path_buf());
+        .base_dir
+        .clone()
+        .or_else(|| tsconfig.compiler_options.paths_dir.clone())
+        .or_else(|| tsconfig.path.parent().map(Path::to_path_buf))?;
 
     // TypeScript picks the most specific pattern, not sorted-key order: exact
     // patterns first, then wildcards by longest literal prefix before `*`.
@@ -155,10 +156,8 @@ fn resolve_tsconfig_base_url(
         return None;
     }
 
-    let base_url = tsconfig.compiler_options.base_url.as_ref()?;
-    let tsconfig_dir = tsconfig.path.parent()?;
-    let base_dir = clean_path(&tsconfig_dir.join(base_url));
-    if let Resolution::Resolved(resolved) = ctx.resolve_path(&base_dir, specifier, web_extensions())
+    let base_dir = tsconfig.compiler_options.base_dir.as_ref()?;
+    if let Resolution::Resolved(resolved) = ctx.resolve_path(base_dir, specifier, web_extensions())
     {
         return Some(resolved);
     }
@@ -166,11 +165,20 @@ fn resolve_tsconfig_base_url(
     None
 }
 
+/// The config governing `importer`: the nearest enclosing one whose merged
+/// options actually declare paths/baseUrl, so an alias-less project config
+/// doesn't shadow an alias-bearing root config. Falls back to nearest overall.
 fn nearest_tsconfig<'a>(ctx: &'a ResolveCtx, importer: &Path) -> Option<&'a TsConfigPath> {
-    ctx.tsconfigs
+    let enclosing = ctx
+        .tsconfigs
         .iter()
-        .filter(|config| importer.starts_with(config.path.parent().unwrap_or(&ctx.repo_root)))
+        .filter(|config| importer.starts_with(config.path.parent().unwrap_or(&ctx.repo_root)));
+
+    enclosing
+        .clone()
+        .filter(|config| config.compiler_options.has_aliases())
         .max_by_key(|config| config.path.components().count())
+        .or_else(|| enclosing.max_by_key(|config| config.path.components().count()))
 }
 
 fn resolve_workspace_package(ctx: &ResolveCtx, specifier: &str) -> Option<PathBuf> {
