@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::graph::{
     AnalysisResult, AnalysisTarget, GraphNode, NodeKind, RootImpact, Workspace, compute_tier,
-    package_key,
+    normalize_separators, package_key,
 };
 
 use super::theme::{RiskTier, Theme};
@@ -216,10 +216,12 @@ fn relative_target(result: &AnalysisResult) -> String {
         AnalysisTarget::Files { files } => files.first(),
     };
     file.map(|file| {
-        file.strip_prefix(&result.repo_root)
-            .unwrap_or(file)
-            .display()
-            .to_string()
+        normalize_separators(
+            file.strip_prefix(&result.repo_root)
+                .unwrap_or(file)
+                .display()
+                .to_string(),
+        )
     })
     .unwrap_or_default()
 }
@@ -447,9 +449,11 @@ fn render_hotspots(
     }
 }
 
-/// Split a path into its directory and bare file name.
+/// Split a path into its directory and bare file name. Labels are normalized
+/// to `/` at creation, but accept `\` too in case a Windows-style path slips
+/// through.
 fn split_dir(path: &str) -> (&str, &str) {
-    path.rsplit_once('/').unwrap_or(("", path))
+    path.rsplit_once(['/', '\\']).unwrap_or(("", path))
 }
 
 fn dir_label(dir: &str) -> String {
@@ -557,4 +561,26 @@ fn confidence_tag(assessment: &Assessment, theme: &Theme) -> String {
 
 fn plural(count: usize) -> &'static str {
     if count == 1 { "" } else { "s" }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::split_dir;
+
+    #[test]
+    fn split_dir_handles_forward_slashes() {
+        assert_eq!(split_dir("src/report/tree.rs"), ("src/report", "tree.rs"));
+        assert_eq!(split_dir("main.rs"), ("", "main.rs"));
+    }
+
+    #[test]
+    fn split_dir_handles_backslashes() {
+        assert_eq!(
+            split_dir("src\\report\\tree.rs"),
+            ("src\\report", "tree.rs")
+        );
+        // Mixed separators: split at the last separator of either kind.
+        assert_eq!(split_dir("src/report\\tree.rs"), ("src/report", "tree.rs"));
+        assert_eq!(split_dir("src\\report/tree.rs"), ("src\\report", "tree.rs"));
+    }
 }
