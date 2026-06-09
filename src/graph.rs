@@ -50,19 +50,35 @@ pub struct RootImpactFile {
     pub depth: usize,
 }
 
+/// Normalize the separators in a path label to `/`. Labels are built from
+/// `Path::display()`, which uses `\` on Windows, while every grouping rule in
+/// this module and the reports splits on `/` — without this, on Windows every
+/// file collapses into package `.` and the package count degrades to 1.
+pub fn normalize_separators(label: impl Into<String>) -> String {
+    let label = label.into();
+    if label.contains('\\') {
+        label.replace('\\', "/")
+    } else {
+        label
+    }
+}
+
 /// Map a repo-relative path to the package that owns it: the longest matching
 /// workspace root, falling back to the top-level directory. `workspaces` is
-/// expected to be sorted longest-root-first.
+/// expected to be sorted longest-root-first. Both the path and the workspace
+/// roots are separator-normalized defensively, so Windows-style labels still
+/// group correctly.
 pub fn package_key(rel_path: &str, workspaces: &[Workspace]) -> String {
-    if let Some(workspace) = workspaces.iter().find(|workspace| {
-        workspace.root.is_empty()
-            || rel_path == workspace.root
-            || rel_path.starts_with(&format!("{}/", workspace.root))
+    let rel_path = normalize_separators(rel_path);
+    if let Some(root) = workspaces.iter().find_map(|workspace| {
+        let root = normalize_separators(workspace.root.as_str());
+        (root.is_empty() || rel_path == root || rel_path.starts_with(&format!("{root}/")))
+            .then_some(root)
     }) {
-        if workspace.root.is_empty() {
+        if root.is_empty() {
             ".".to_string()
         } else {
-            workspace.root.clone()
+            root
         }
     } else {
         match rel_path.split_once('/') {
@@ -203,5 +219,72 @@ impl ModuleState {
                 .or_default()
                 .insert(exported);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Workspace, normalize_separators, package_key};
+
+    fn workspace(name: &str, root: &str) -> Workspace {
+        Workspace {
+            name: name.to_string(),
+            root: root.to_string(),
+        }
+    }
+
+    #[test]
+    fn normalize_separators_converts_backslashes() {
+        assert_eq!(
+            normalize_separators("src\\report\\tree.rs"),
+            "src/report/tree.rs"
+        );
+        assert_eq!(
+            normalize_separators("src/report/tree.rs"),
+            "src/report/tree.rs"
+        );
+        assert_eq!(normalize_separators(""), "");
+    }
+
+    #[test]
+    fn package_key_matches_workspace_with_backslash_path() {
+        let workspaces = vec![workspace("ui", "packages/ui"), workspace("repo", "")];
+        assert_eq!(
+            package_key("packages\\ui\\src\\button.tsx", &workspaces),
+            "packages/ui"
+        );
+        // Exact match on the workspace root itself.
+        assert_eq!(package_key("packages\\ui", &workspaces), "packages/ui");
+    }
+
+    #[test]
+    fn package_key_handles_backslash_workspace_roots() {
+        // Workspace roots are labels too, so normalize them defensively as well.
+        let workspaces = vec![workspace("ui", "packages\\ui")];
+        assert_eq!(
+            package_key("packages/ui/src/button.tsx", &workspaces),
+            "packages/ui"
+        );
+        assert_eq!(
+            package_key("packages\\ui\\src\\button.tsx", &workspaces),
+            "packages/ui"
+        );
+    }
+
+    #[test]
+    fn package_key_falls_back_to_top_level_directory() {
+        assert_eq!(package_key("src\\lib\\util.rs", &[]), "src");
+        assert_eq!(package_key("src/lib/util.rs", &[]), "src");
+        assert_eq!(package_key("main.rs", &[]), ".");
+    }
+
+    #[test]
+    fn package_key_does_not_match_sibling_prefix() {
+        // "packages/ui-kit" must not match the "packages/ui" workspace.
+        let workspaces = vec![workspace("ui", "packages/ui")];
+        assert_eq!(
+            package_key("packages\\ui-kit\\src\\index.ts", &workspaces),
+            "packages"
+        );
     }
 }

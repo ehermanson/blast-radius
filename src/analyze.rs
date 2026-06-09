@@ -447,9 +447,14 @@ pub(super) fn export_id(path: &Path, export: &str) -> String {
     format!("export:{}#{export}", path.display())
 }
 
+/// Render a path relative to the repo root, always with `/` separators —
+/// `Path::display()` yields `\` on Windows, which would break the `/`-based
+/// package and directory grouping downstream.
 pub(super) fn relative_label(repo_root: &Path, path: &Path) -> String {
-    path.strip_prefix(repo_root)
-        .unwrap_or(path)
-        .display()
-        .to_string()
+    crate::graph::normalize_separators(
+        path.strip_prefix(repo_root)
+            .unwrap_or(path)
+            .display()
+            .to_string(),
+    )
 }
