@@ -27,6 +27,10 @@ pub struct Cli {
     #[arg(long, short = 'v', global = true, default_value_t = false)]
     pub verbose: bool,
 
+    /// Include grouped unresolved-import diagnostics in warnings.
+    #[arg(long, global = true, default_value_t = false)]
+    pub explain_unresolved: bool,
+
     /// Exit non-zero (code 2) when more than this many files are affected.
     #[arg(long)]
     pub fail_threshold: Option<usize>,

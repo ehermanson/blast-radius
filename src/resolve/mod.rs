@@ -6,8 +6,10 @@ use anyhow::Result;
 use crate::fs::{RepoContext, TsConfigPath};
 
 mod package;
-use package::{PackageInfo, load_package_info};
-pub(crate) use package::{package_specifier_parts, resolve_package_export};
+use package::load_package_info;
+pub(crate) use package::{
+    PackageInfo, package_specifier_parts, resolve_package_export, resolve_package_import,
+};
 
 #[cfg(test)]
 mod tests;

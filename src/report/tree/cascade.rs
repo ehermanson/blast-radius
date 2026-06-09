@@ -329,6 +329,7 @@ fn edge_label(kind: EdgeKind, is_ambiguous: bool, theme: &Theme) -> String {
         EdgeKind::ImportsNamed => "named import",
         EdgeKind::ImportsDefault => "default import",
         EdgeKind::ImportsNamespace => "namespace import",
+        EdgeKind::ImportsDynamic => "dynamic import",
         EdgeKind::ReexportsNamed => "re-export",
         EdgeKind::ReexportsStar => "export *",
         EdgeKind::UsesJsxComponent => "component use",

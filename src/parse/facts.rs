@@ -65,6 +65,8 @@ pub enum ImportTarget {
 pub enum ImportKind {
     Esm,
     CommonJs,
+    /// A dynamic `import("...")` call, e.g. a lazy route or code-split component.
+    Dynamic,
 }
 
 #[derive(Debug, Clone)]

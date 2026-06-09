@@ -79,6 +79,39 @@ export function renderAvatar(params) {
     }
 
     #[test]
+    fn parses_dynamic_imports_as_used_namespace_imports() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("routes.tsx");
+        fs::write(
+            &path,
+            r#"
+import { lazy } from 'react';
+
+const ChatsPage = lazy(() =>
+  import("@/pages/chats-page").then((m) => ({ default: m.ChatsPage }))
+);
+const Settings = lazy(() => import(`./settings-page`));
+
+export const routes = [ChatsPage, Settings];
+"#,
+        )
+        .unwrap();
+
+        let facts = parse_module(&path).unwrap();
+        for source in ["@/pages/chats-page", "./settings-page"] {
+            let import = facts
+                .imports
+                .iter()
+                .find(|import| import.source == source)
+                .expect("dynamic import should be collected");
+            assert_eq!(import.kind, super::ImportKind::Dynamic);
+            assert_eq!(import.imported, super::ImportTarget::Namespace);
+            // The call site is the usage, so the edge must count in the walk.
+            assert!(facts.used_locals.contains(&import.local));
+        }
+    }
+
+    #[test]
     fn parses_modern_module_extensions() {
         let dir = tempdir().unwrap();
 

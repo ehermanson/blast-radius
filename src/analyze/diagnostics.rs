@@ -1,17 +1,27 @@
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::parse::{ImportFact, ModuleFacts};
 use crate::resolve::Resolution;
 
-use super::ResolutionCache;
+use super::{ResolutionCache, relative_label};
 
-pub(super) fn count_unresolved_imports(
+#[derive(Debug, Clone, Default)]
+pub(super) struct UnresolvedDiagnostics {
+    pub(super) count: usize,
+    pub(super) warnings: Vec<String>,
+}
+
+pub(super) fn unresolved_import_diagnostics(
     modules: &BTreeMap<PathBuf, ModuleFacts>,
     resolution_cache: &mut ResolutionCache<'_>,
     ignore: &[String],
-) -> usize {
+    repo_root: &Path,
+    explain: bool,
+) -> UnresolvedDiagnostics {
     let mut count = 0;
+    let mut groups: BTreeMap<&'static str, BTreeMap<String, UnresolvedImportEntry>> =
+        BTreeMap::new();
 
     for module in modules.values() {
         for import in &module.imports {
@@ -26,11 +36,61 @@ pub(super) fn count_unresolved_imports(
                 Resolution::Unresolved
             ) {
                 count += 1;
+                if explain {
+                    let reason = unresolved_reason(&import.source);
+                    let entry = groups
+                        .entry(reason)
+                        .or_default()
+                        .entry(import.source.clone())
+                        .or_insert_with(|| UnresolvedImportEntry {
+                            count: 0,
+                            example_importer: relative_label(repo_root, &module.file),
+                        });
+                    entry.count += 1;
+                }
             }
         }
     }
 
-    count
+    let mut warnings = Vec::new();
+    if explain && count > 0 {
+        warnings.push(format!(
+            "unresolved import details: {count} internal import{} could not be resolved",
+            if count == 1 { "" } else { "s" }
+        ));
+        for (reason, imports) in groups {
+            warnings.push(format!("unresolved imports · {reason}:"));
+            for (specifier, entry) in imports {
+                warnings.push(format!(
+                    "  {specifier} ({} occurrence{}, e.g. {})",
+                    entry.count,
+                    if entry.count == 1 { "" } else { "s" },
+                    entry.example_importer
+                ));
+            }
+        }
+    }
+
+    UnresolvedDiagnostics { count, warnings }
+}
+
+#[derive(Debug, Clone)]
+struct UnresolvedImportEntry {
+    count: usize,
+    example_importer: String,
+}
+
+fn unresolved_reason(specifier: &str) -> &'static str {
+    if specifier.starts_with('.') || specifier.starts_with('/') {
+        return "relative or absolute path";
+    }
+    if specifier.starts_with('#') {
+        return "package.json imports";
+    }
+    if specifier.starts_with('@') {
+        return "tsconfig paths or workspace package export";
+    }
+    "workspace package export or tsconfig baseUrl"
 }
 
 /// Import extensions that are assets/data rather than code modules, so a missing
