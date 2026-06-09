@@ -9,3 +9,7 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # The "version" of this action is the rustc toolchain it installs;
+      # the MSRV job must stay pinned to the declared rust-version.
+      - dependency-name: dtolnay/rust-toolchain
