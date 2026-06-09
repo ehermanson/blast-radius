@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use anyhow::Result;
@@ -6,10 +7,13 @@ use super::{ExportFact, ExportKind, ImportFact, ImportKind, ImportTarget, Module
 
 pub(crate) fn parse_java_module(path: &Path, source: &str) -> Result<ModuleFacts> {
     let mut facts = ModuleFacts::empty(path);
+    let mut wildcard_packages = Vec::new();
+    let mut imported_names = BTreeSet::new();
+    let mut used_types = BTreeSet::new();
 
     for line in source.lines() {
         let line = line.trim();
-        if line.starts_with("//") || line.is_empty() {
+        if line.starts_with("//") || line.starts_with("package ") || line.is_empty() {
             continue;
         }
 
@@ -21,8 +25,12 @@ pub(crate) fn parse_java_module(path: &Path, source: &str) -> Result<ModuleFacts
                 .trim_end_matches(".*")
                 .to_string();
             let imported = if import.ends_with(".*") {
+                if let Some(package) = import.strip_suffix(".*") {
+                    wildcard_packages.push(package.to_string());
+                }
                 ImportTarget::Namespace
             } else {
+                imported_names.insert(local.clone());
                 ImportTarget::Name(local.clone())
             };
             facts.imports.push(ImportFact {
@@ -40,6 +48,32 @@ pub(crate) fn parse_java_module(path: &Path, source: &str) -> Result<ModuleFacts
                 exported: name.clone(),
                 local: Some(name),
                 kind: ExportKind::Local,
+            });
+        }
+
+        collect_java_type_tokens(line, &mut used_types);
+    }
+
+    // A wildcard import can bind any type of its package, so fan out: emit one
+    // named fact per type-looking identifier used in the body. Candidates that
+    // do not exist in the package simply stay unresolved (and external, so they
+    // are not counted as unresolved internal imports).
+    let declared: BTreeSet<&str> = facts
+        .exports
+        .iter()
+        .filter_map(|export| export.local.as_deref())
+        .collect();
+    for package in &wildcard_packages {
+        for name in &used_types {
+            if declared.contains(name.as_str()) || imported_names.contains(name) {
+                continue;
+            }
+            facts.imports.push(ImportFact {
+                source: format!("{package}.{name}"),
+                local: name.clone(),
+                imported: ImportTarget::Name(name.clone()),
+                kind: ImportKind::Esm,
+                type_only: false,
             });
         }
     }
@@ -67,4 +101,18 @@ fn java_declared_type(line: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Collect identifiers that look like type references (leading uppercase, Java
+/// convention) as candidates for wildcard-import fan-out.
+fn collect_java_type_tokens(line: &str, used: &mut BTreeSet<String>) {
+    for token in line.split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_') {
+        if token
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_ascii_uppercase())
+        {
+            used.insert(token.to_string());
+        }
+    }
 }
