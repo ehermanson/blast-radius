@@ -164,6 +164,7 @@ pub enum EdgeKind {
     ImportsNamed,
     ImportsDefault,
     ImportsNamespace,
+    ImportsDynamic,
     ReexportsNamed,
     ReexportsStar,
     UsesJsxComponent,

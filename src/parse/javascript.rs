@@ -5,7 +5,7 @@ use anyhow::Result;
 use swc_common::{FileName, SourceMap, sync::Lrc};
 use swc_ecma_ast::*;
 use swc_ecma_parser::{EsSyntax, Parser, StringInput, Syntax, TsSyntax, lexer::Lexer};
-use swc_ecma_visit::VisitWith;
+use swc_ecma_visit::{Visit, VisitWith};
 
 use super::*;
 
@@ -89,7 +89,54 @@ pub(super) fn module_facts_from_javascript_module(
     facts.namespace_member_usage = usage_collector.namespace_member_usage;
     facts.jsx_namespace_member_usage = usage_collector.jsx_namespace_member_usage;
 
+    collect_dynamic_imports(module, &mut facts);
+
     Ok(facts)
+}
+
+/// Collect dynamic `import("...")` calls. They can appear anywhere in the
+/// module (lazy routes, code-split components), so this needs a full AST walk
+/// rather than the top-level item loop. Each one is recorded as a namespace
+/// import under a synthetic local — the call evaluates to the whole module's
+/// namespace, and the synthetic name can't collide with a real identifier.
+fn collect_dynamic_imports(module: &Module, facts: &mut ModuleFacts) {
+    let mut collector = DynamicImportCollector::default();
+    module.visit_with(&mut collector);
+
+    let mut seen = BTreeSet::new();
+    for (index, source) in collector.sources.into_iter().enumerate() {
+        if !seen.insert(source.clone()) {
+            continue;
+        }
+        let local = format!("import():{index}");
+        facts.imports.push(ImportFact {
+            source,
+            local: local.clone(),
+            imported: ImportTarget::Namespace,
+            kind: ImportKind::Dynamic,
+            type_only: false,
+        });
+        // The call site is itself the usage — mark the synthetic local used so
+        // the walk counts the edge.
+        facts.used_locals.insert(local);
+    }
+}
+
+#[derive(Default)]
+struct DynamicImportCollector {
+    sources: Vec<String>,
+}
+
+impl Visit for DynamicImportCollector {
+    fn visit_call_expr(&mut self, call: &CallExpr) {
+        call.visit_children_with(self);
+        if matches!(call.callee, Callee::Import(_))
+            && let Some(argument) = call.args.first()
+            && let Some(source) = literal_string(&argument.expr)
+        {
+            self.sources.push(source);
+        }
+    }
 }
 
 pub(super) fn parse_source(path: &Path, source: &str) -> Result<Module> {
@@ -413,6 +460,11 @@ fn collect_pat_names(pat: &Pat, names: &mut Vec<String>) {
 fn literal_string(expr: &Expr) -> Option<String> {
     match expr {
         Expr::Lit(Lit::Str(value)) => Some(value.value.to_string_lossy().to_string()),
+        // A template literal with no interpolations is still a fixed path.
+        Expr::Tpl(tpl) if tpl.exprs.is_empty() && tpl.quasis.len() == 1 => tpl.quasis[0]
+            .cooked
+            .as_ref()
+            .map(|value| value.to_string_lossy().to_string()),
         _ => None,
     }
 }

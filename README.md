@@ -42,6 +42,9 @@ and supports Python, Rust, Ruby, Java, Vue, and Svelte as optional add-ons.
 Install the binary (requires a Rust toolchain with `cargo`):
 
 ```bash
+# From crates.io
+cargo install blast-radius
+
 # Straight from GitHub
 cargo install --git https://github.com/ehermanson/blast-radius
 
@@ -134,6 +137,7 @@ Global flags:
 | `--format <tree\|json\|mermaid\|dot>` | Output format (default: `tree`).                    |
 | `--output <file>`                     | Write output to a file instead of stdout.           |
 | `--verbose`, `-v`                     | Show the full cascade tree.                         |
+| `--explain-unresolved`                | Group unresolved internal imports by likely cause.  |
 | `--fail-threshold <n>`                | Exit code 2 when more than `n` files are affected.  |
 | `--fail-on-risk <tier>`               | Exit code 2 when the verdict is at or above `tier`. |
 
@@ -149,7 +153,8 @@ Global flags:
 The default binary supports **JavaScript and TypeScript** (`js`, `jsx`, `ts`,
 `tsx`), including ESM imports/exports, CommonJS `require`/`module.exports`,
 default and named exports, barrels, `export *`, `tsconfig.json` path aliases,
-and cross-package resolution across workspace packages.
+`baseUrl`, package `imports`/`exports`, `.js` specifiers backed by TypeScript
+source files, and cross-package resolution across workspace packages.
 
 Other languages are compiled in at **build time** with Cargo features (there is
 no runtime `--language` flag — a binary scans whatever was built into it):

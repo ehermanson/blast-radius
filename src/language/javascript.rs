@@ -7,7 +7,7 @@ use crate::fs::TsConfigPath;
 use crate::parse::{ModuleFacts, parse_javascript_module};
 use crate::resolve::{
     Resolution, ResolveCtx, apply_alias_target, clean_path, match_alias, package_specifier_parts,
-    resolve_package_export,
+    resolve_package_export, resolve_package_import,
 };
 
 use super::LanguageAdapter;
@@ -69,6 +69,10 @@ pub(super) fn resolve_javascript_import(
         return Resolution::Resolved(path);
     }
 
+    if let Some(path) = resolve_package_imports(ctx, importer, specifier) {
+        return Resolution::Resolved(path);
+    }
+
     if let Some(path) = resolve_workspace_package(ctx, specifier) {
         return Resolution::Resolved(path);
     }
@@ -86,12 +90,17 @@ pub(super) fn is_internal_javascript_specifier(
     }
 
     if let Some(tsconfig) = nearest_tsconfig(ctx, importer)
-        && tsconfig
+        && (tsconfig
             .compiler_options
             .paths
             .keys()
             .any(|pattern| match_alias(pattern, specifier).is_some())
+            || resolve_tsconfig_base_url(ctx, tsconfig, specifier).is_some())
     {
+        return true;
+    }
+
+    if specifier.starts_with('#') && nearest_package(ctx, importer).is_some() {
         return true;
     }
 
@@ -134,6 +143,26 @@ fn resolve_tsconfig_alias(ctx: &ResolveCtx, importer: &Path, specifier: &str) ->
         }
     }
 
+    resolve_tsconfig_base_url(ctx, tsconfig, specifier)
+}
+
+fn resolve_tsconfig_base_url(
+    ctx: &ResolveCtx,
+    tsconfig: &TsConfigPath,
+    specifier: &str,
+) -> Option<PathBuf> {
+    if specifier.starts_with('.') || specifier.starts_with('/') || specifier.starts_with('#') {
+        return None;
+    }
+
+    let base_url = tsconfig.compiler_options.base_url.as_ref()?;
+    let tsconfig_dir = tsconfig.path.parent()?;
+    let base_dir = clean_path(&tsconfig_dir.join(base_url));
+    if let Resolution::Resolved(resolved) = ctx.resolve_path(&base_dir, specifier, web_extensions())
+    {
+        return Some(resolved);
+    }
+
     None
 }
 
@@ -153,10 +182,10 @@ fn resolve_workspace_package(ctx: &ResolveCtx, specifier: &str) -> Option<PathBu
 
     if let Some(rest) = rest {
         let export_key = format!("./{rest}");
-        if let Some(resolved) = resolve_package_export(package, &export_key)
-            .and_then(|path| ctx.try_resolve_candidate(&path, web_extensions()))
-        {
-            return Some(resolved);
+        for path in resolve_package_export(package, &export_key) {
+            if let Some(resolved) = ctx.try_resolve_candidate(&path, web_extensions()) {
+                return Some(resolved);
+            }
         }
 
         let direct = package.root.join(rest);
@@ -172,10 +201,10 @@ fn resolve_workspace_package(ctx: &ResolveCtx, specifier: &str) -> Option<PathBu
         return None;
     }
 
-    if let Some(resolved) = resolve_package_export(package, ".")
-        .and_then(|path| ctx.try_resolve_candidate(&path, web_extensions()))
-    {
-        return Some(resolved);
+    for path in resolve_package_export(package, ".") {
+        if let Some(resolved) = ctx.try_resolve_candidate(&path, web_extensions()) {
+            return Some(resolved);
+        }
     }
 
     for candidate in &package.entry_candidates {
@@ -185,4 +214,29 @@ fn resolve_workspace_package(ctx: &ResolveCtx, specifier: &str) -> Option<PathBu
     }
 
     None
+}
+
+fn resolve_package_imports(ctx: &ResolveCtx, importer: &Path, specifier: &str) -> Option<PathBuf> {
+    if !specifier.starts_with('#') {
+        return None;
+    }
+
+    let package = nearest_package(ctx, importer)?;
+    for path in resolve_package_import(package, specifier) {
+        if let Some(resolved) = ctx.try_resolve_candidate(&path, web_extensions()) {
+            return Some(resolved);
+        }
+    }
+
+    None
+}
+
+fn nearest_package<'a>(
+    ctx: &'a ResolveCtx,
+    importer: &Path,
+) -> Option<&'a crate::resolve::PackageInfo> {
+    ctx.packages
+        .iter()
+        .filter(|package| importer.starts_with(&package.root))
+        .max_by_key(|package| package.root.components().count())
 }

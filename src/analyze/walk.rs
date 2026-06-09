@@ -77,6 +77,7 @@ pub(super) fn build_reverse_links(
                         imported: import.imported.clone(),
                         local: import.local.clone(),
                         kind: match (&import.imported, import.kind) {
+                            (_, ImportKind::Dynamic) => EdgeKind::ImportsDynamic,
                             (ImportTarget::Default, ImportKind::CommonJs) => {
                                 EdgeKind::RequiresModule
                             }

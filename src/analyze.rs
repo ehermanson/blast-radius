@@ -16,7 +16,7 @@ mod result;
 use result::{ResultMetadata, build_result, collect_workspaces};
 
 mod diagnostics;
-use diagnostics::count_unresolved_imports;
+use diagnostics::unresolved_import_diagnostics;
 
 struct AnalysisData<'a> {
     context: &'a RepoContext,
@@ -70,8 +70,14 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
     warnings.extend(resolver.warnings());
     let module_states = build_module_states(&modules);
     let reverse = build_reverse_links(&modules, &module_states, &mut resolution_cache);
-    let unresolved_imports =
-        count_unresolved_imports(&modules, &mut resolution_cache, &context.ignore_unresolved);
+    let unresolved = unresolved_import_diagnostics(
+        &modules,
+        &mut resolution_cache,
+        &context.ignore_unresolved,
+        &context.repo_root,
+        cli.explain_unresolved,
+    );
+    warnings.extend(unresolved.warnings);
     let analysis_data = AnalysisData {
         context,
         modules: &modules,
@@ -101,7 +107,7 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
                 RunDiagnostics {
                     warnings,
                     parse_failures,
-                    unresolved_imports,
+                    unresolved_imports: unresolved.count,
                     skipped_inputs: 0,
                 },
                 vec![(file, exports)],
@@ -125,7 +131,7 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
                 RunDiagnostics {
                     warnings,
                     parse_failures,
-                    unresolved_imports,
+                    unresolved_imports: unresolved.count,
                     skipped_inputs: 0,
                 },
                 vec![(file, exports)],
@@ -174,7 +180,7 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
                 RunDiagnostics {
                     warnings,
                     parse_failures,
-                    unresolved_imports,
+                    unresolved_imports: unresolved.count,
                     skipped_inputs,
                 },
                 roots,

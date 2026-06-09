@@ -606,6 +606,100 @@ fn file_mode_skips_unparseable_files_and_reports_them() {
 }
 
 #[test]
+fn explain_unresolved_groups_internal_imports_by_reason() {
+    let repo = tempdir().unwrap();
+    fs::create_dir_all(repo.path().join("src")).unwrap();
+    fs::write(
+        repo.path().join("tsconfig.json"),
+        r#"{"compilerOptions":{"baseUrl":".","paths":{"@/*":["src/*"]}}}"#,
+    )
+    .unwrap();
+    fs::write(repo.path().join("package.json"), r#"{"name":"fixture"}"#).unwrap();
+    fs::write(
+        repo.path().join("src/App.ts"),
+        "import { missing } from './missing';
+         import { alsoMissing } from '@/also-missing';
+         import { notConfigured } from '#not-configured';
+         export const app = [missing, alsoMissing, notConfigured];",
+    )
+    .unwrap();
+
+    let output = AssertCommand::cargo_bin("blast-radius")
+        .unwrap()
+        .current_dir(repo.path())
+        .args([
+            "--repo-root",
+            repo.path().to_str().unwrap(),
+            "--format",
+            "json",
+            "--explain-unresolved",
+            "file",
+            "src/App.ts",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let json: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(json["summary"]["unresolved_imports"].as_u64().unwrap(), 3);
+    let warnings = json["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|warning| warning.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(warnings.contains("unresolved imports · relative or absolute path"));
+    assert!(warnings.contains("./missing"));
+    assert!(warnings.contains("unresolved imports · tsconfig paths or workspace package export"));
+    assert!(warnings.contains("@/also-missing"));
+    assert!(warnings.contains("unresolved imports · package.json imports"));
+    assert!(warnings.contains("#not-configured"));
+}
+
+#[test]
+fn dynamic_imports_resolve_through_aliases_and_report_dynamic_edges() {
+    let repo = tempdir().unwrap();
+    fs::create_dir_all(repo.path().join("src/pages")).unwrap();
+    fs::write(
+        repo.path().join("tsconfig.json"),
+        r#"{"compilerOptions":{"baseUrl":".","paths":{"@/*":["src/*"]}}}"#,
+    )
+    .unwrap();
+    fs::write(repo.path().join("package.json"), r#"{"name":"fixture"}"#).unwrap();
+    fs::write(
+        repo.path().join("src/pages/Dashboard.ts"),
+        "export const Dashboard = () => null;",
+    )
+    .unwrap();
+    fs::write(
+        repo.path().join("src/routes.ts"),
+        "export const loadDashboard = () => import('@/pages/Dashboard.js');",
+    )
+    .unwrap();
+
+    let json = run_json(
+        repo.path(),
+        &["export", "src/pages/Dashboard.ts", "Dashboard"],
+    );
+
+    assert_eq!(json["summary"]["unresolved_imports"].as_u64().unwrap(), 0);
+    assert!(
+        node_labels(&json)
+            .iter()
+            .any(|label| label == "src/routes.ts")
+    );
+    assert!(json["edges"].as_array().unwrap().iter().any(|edge| {
+        edge["kind"] == "imports_dynamic"
+            && edge["to"]
+                .as_str()
+                .is_some_and(|to| to.contains("src/routes.ts"))
+    }));
+}
+
+#[test]
 fn chakra_ui_example_analyzes_real_world_repo() {
     let repo = chakra_example_root();
     if !repo.join("package.json").exists() {

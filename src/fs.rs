@@ -43,7 +43,7 @@ pub struct TsConfigPath {
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct TsCompilerOptions {
-    #[serde(default)]
+    #[serde(default, rename = "baseUrl")]
     pub base_url: Option<String>,
     #[serde(default)]
     pub paths: BTreeMap<String, Vec<String>>,

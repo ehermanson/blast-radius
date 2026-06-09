@@ -13,12 +13,13 @@ pub(crate) struct PackageInfo {
     pub(crate) root: PathBuf,
     pub(crate) entry_candidates: Vec<PathBuf>,
     export_mappings: Vec<ExportMapping>,
+    import_mappings: Vec<ExportMapping>,
 }
 
 #[derive(Debug, Clone)]
 struct ExportMapping {
     key: String,
-    target: String,
+    targets: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -35,6 +36,8 @@ struct PackageJson {
     types: Option<String>,
     #[serde(default)]
     exports: Option<Value>,
+    #[serde(default)]
+    imports: Option<Value>,
 }
 
 pub(crate) fn package_specifier_parts(specifier: &str) -> Option<(&str, Option<&str>)> {
@@ -86,71 +89,142 @@ pub(super) fn load_package_info(path: &Path) -> Result<Option<PackageInfo>> {
     entry_candidates.push(root.join("index.tsx"));
     entry_candidates.push(root.join("index.js"));
     entry_candidates.push(root.join("index.jsx"));
-    let export_mappings = collect_export_mappings(parsed.exports.as_ref());
+    let export_mappings = collect_package_mappings(parsed.exports.as_ref(), ".");
+    let import_mappings = collect_package_mappings(parsed.imports.as_ref(), "#");
 
     Ok(Some(PackageInfo {
         name: parsed.name,
         root,
         entry_candidates,
         export_mappings,
+        import_mappings,
     }))
 }
 
-fn collect_export_mappings(exports: Option<&Value>) -> Vec<ExportMapping> {
-    let Some(Value::Object(map)) = exports else {
+fn collect_package_mappings(value: Option<&Value>, required_prefix: &str) -> Vec<ExportMapping> {
+    let Some(value) = value else {
         return Vec::new();
     };
 
+    if required_prefix == "." && !matches!(value, Value::Object(_)) {
+        let targets = conditional_targets(value);
+        return if targets.is_empty() {
+            Vec::new()
+        } else {
+            vec![ExportMapping {
+                key: ".".to_string(),
+                targets,
+            }]
+        };
+    }
+
+    let Value::Object(map) = value else {
+        return Vec::new();
+    };
+
+    if required_prefix == "." && !map.keys().any(|key| key.starts_with('.')) {
+        let targets = conditional_targets(value);
+        return if targets.is_empty() {
+            Vec::new()
+        } else {
+            vec![ExportMapping {
+                key: ".".to_string(),
+                targets,
+            }]
+        };
+    }
+
     let mut mappings = Vec::new();
     for (key, value) in map {
-        if !key.starts_with('.') {
+        if !key.starts_with(required_prefix) {
             continue;
         }
-        if let Some(target) = export_target(value) {
+        let targets = conditional_targets(value);
+        if !targets.is_empty() {
             mappings.push(ExportMapping {
                 key: key.clone(),
-                target,
+                targets,
             });
         }
     }
     mappings
 }
 
-fn export_target(value: &Value) -> Option<String> {
+fn conditional_targets(value: &Value) -> Vec<String> {
     match value {
-        Value::String(path) => Some(path.clone()),
+        Value::String(path) => vec![path.clone()],
+        Value::Array(values) => values
+            .iter()
+            .flat_map(conditional_targets)
+            .collect::<Vec<_>>(),
         Value::Object(map) => {
-            for key in ["dev", "source"] {
+            let mut targets = Vec::new();
+            for key in ["development", "dev", "source", "types"] {
                 if let Some(Value::String(path)) = map.get(key) {
-                    return Some(path.clone());
+                    targets.push(path.clone());
+                } else if let Some(value) = map.get(key) {
+                    targets.extend(conditional_targets(value));
                 }
             }
 
-            for key in ["default", "import", "require"] {
-                if let Some(target) = map.get(key).and_then(export_target) {
-                    return Some(target);
+            // Unknown custom conditions often point at source in monorepos.
+            // Prefer them over runtime fallbacks such as `default`.
+            for (key, value) in map {
+                if matches!(
+                    key.as_str(),
+                    "development" | "dev" | "source" | "types" | "default" | "import" | "require"
+                ) {
+                    continue;
+                }
+                targets.extend(conditional_targets(value));
+            }
+
+            for key in ["import", "require", "default"] {
+                if let Some(value) = map.get(key) {
+                    targets.extend(conditional_targets(value));
                 }
             }
 
-            None
+            dedupe(targets)
         }
-        _ => None,
+        _ => Vec::new(),
     }
 }
 
-pub(crate) fn resolve_package_export(package: &PackageInfo, export_key: &str) -> Option<PathBuf> {
+fn dedupe(values: Vec<String>) -> Vec<String> {
+    let mut deduped = Vec::new();
+    for value in values {
+        if !deduped.contains(&value) {
+            deduped.push(value);
+        }
+    }
+    deduped
+}
+
+pub(crate) fn resolve_package_export(package: &PackageInfo, export_key: &str) -> Vec<PathBuf> {
+    resolve_package_mapping(&package.export_mappings, &package.root, export_key)
+}
+
+pub(crate) fn resolve_package_import(package: &PackageInfo, import_key: &str) -> Vec<PathBuf> {
+    resolve_package_mapping(&package.import_mappings, &package.root, import_key)
+}
+
+fn resolve_package_mapping(mappings: &[ExportMapping], root: &Path, key: &str) -> Vec<PathBuf> {
     // Exact (non-wildcard) export keys take precedence over wildcard patterns,
     // matching Node's `exports` resolution.
-    for mapping in &package.export_mappings {
-        if !mapping.key.contains('*') && mapping.key == export_key {
-            return Some(package.root.join(&mapping.target));
+    for mapping in mappings {
+        if !mapping.key.contains('*') && mapping.key == key {
+            return mapping
+                .targets
+                .iter()
+                .map(|target| root.join(target))
+                .collect();
         }
     }
 
     // Among wildcard patterns, the most specific wins: the longest literal
     // prefix before `*`.
-    let mut wildcards: Vec<&ExportMapping> = package
-        .export_mappings
+    let mut wildcards: Vec<&ExportMapping> = mappings
         .iter()
         .filter(|mapping| mapping.key.contains('*'))
         .collect();
@@ -159,11 +233,14 @@ pub(crate) fn resolve_package_export(package: &PackageInfo, export_key: &str) ->
     });
 
     for mapping in wildcards {
-        if let Some(captures) = match_alias(&mapping.key, export_key) {
-            let target = apply_alias_target(&mapping.target, &captures);
-            return Some(package.root.join(target));
+        if let Some(captures) = match_alias(&mapping.key, key) {
+            return mapping
+                .targets
+                .iter()
+                .map(|target| root.join(apply_alias_target(target, &captures)))
+                .collect();
         }
     }
 
-    None
+    Vec::new()
 }

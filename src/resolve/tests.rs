@@ -140,6 +140,138 @@ fn resolves_workspace_package_exports() {
 }
 
 #[test]
+fn resolves_package_imports_with_custom_source_condition() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("server/core")).unwrap();
+    fs::create_dir_all(dir.path().join("dist/core")).unwrap();
+    fs::create_dir_all(dir.path().join("app/src")).unwrap();
+    fs::write(
+        dir.path().join("package.json"),
+        r##"{
+            "name":"fixture",
+            "imports":{
+                "#core/*.js":{
+                    "custom-source":"./server/core/*.ts",
+                    "default":"./dist/core/*.js"
+                }
+            }
+        }"##,
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("server/core/foo.ts"),
+        "export const foo = true;",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("app/src/App.ts"),
+        "import { foo } from '#core/foo.js';",
+    )
+    .unwrap();
+
+    let context = RepoContext::discover(dir.path()).unwrap();
+    let resolver = Resolver::new(&context).unwrap();
+    let importer = dir.path().join("app/src/App.ts");
+
+    assert!(matches!(
+        resolver.resolve(&importer, "#core/foo.js"),
+        Resolution::Resolved(path) if path.ends_with("server/core/foo.ts")
+    ));
+    assert!(resolver.is_internal_specifier(&importer, "#core/foo.js"));
+}
+
+#[test]
+fn resolves_vite_tsconfig_paths_and_base_url() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("app/src/components")).unwrap();
+    fs::create_dir_all(dir.path().join("server/core")).unwrap();
+    fs::write(
+        dir.path().join("tsconfig.json"),
+        r#"{"compilerOptions":{"baseUrl":".","paths":{
+            "@/*":["app/src/*"],
+            "@shared/*":["server/core/*"]
+        }}}"#,
+    )
+    .unwrap();
+    fs::write(dir.path().join("package.json"), r#"{"name":"fixture"}"#).unwrap();
+    fs::write(
+        dir.path().join("app/src/components/Button.tsx"),
+        "export const Button = () => null;",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("server/core/foo.ts"),
+        "export const foo = true;",
+    )
+    .unwrap();
+    fs::write(dir.path().join("app/src/env.ts"), "export const env = {};").unwrap();
+    fs::write(
+        dir.path().join("app/src/App.tsx"),
+        "import { Button } from '@/components/Button.js';
+         import { foo } from '@shared/foo.js';
+         import { env } from 'app/src/env.js';",
+    )
+    .unwrap();
+
+    let context = RepoContext::discover(dir.path()).unwrap();
+    let resolver = Resolver::new(&context).unwrap();
+    let importer = dir.path().join("app/src/App.tsx");
+
+    assert!(matches!(
+        resolver.resolve(&importer, "@/components/Button.js"),
+        Resolution::Resolved(path) if path.ends_with("app/src/components/Button.tsx")
+    ));
+    assert!(matches!(
+        resolver.resolve(&importer, "@shared/foo.js"),
+        Resolution::Resolved(path) if path.ends_with("server/core/foo.ts")
+    ));
+    assert!(matches!(
+        resolver.resolve(&importer, "app/src/env.js"),
+        Resolution::Resolved(path) if path.ends_with("app/src/env.ts")
+    ));
+}
+
+#[test]
+fn resolves_workspace_exports_with_custom_source_condition() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("packages/core/server/core")).unwrap();
+    fs::create_dir_all(dir.path().join("packages/core/dist/core")).unwrap();
+    fs::create_dir_all(dir.path().join("apps/web/src")).unwrap();
+    fs::write(
+        dir.path().join("packages/core/package.json"),
+        r#"{
+            "name":"@acme/core",
+            "exports":{
+                "./*.js":{
+                    "custom-source":"./server/core/*.ts",
+                    "default":"./dist/core/*.js"
+                }
+            }
+        }"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("packages/core/server/core/foo.ts"),
+        "export const foo = true;",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("apps/web/src/App.ts"),
+        "import { foo } from '@acme/core/foo.js';",
+    )
+    .unwrap();
+
+    let context = RepoContext::discover(dir.path()).unwrap();
+    let resolver = Resolver::new(&context).unwrap();
+    let importer = dir.path().join("apps/web/src/App.ts");
+
+    assert!(matches!(
+        resolver.resolve(&importer, "@acme/core/foo.js"),
+        Resolution::Resolved(path) if path.ends_with("packages/core/server/core/foo.ts")
+    ));
+}
+
+#[test]
 fn resolves_multi_dot_basenames() {
     let dir = tempdir().unwrap();
     fs::create_dir_all(dir.path().join("src")).unwrap();
