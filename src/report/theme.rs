@@ -134,6 +134,16 @@ impl Theme {
         )
     }
 
+    /// A small proportional bar for the hotspot chart, tinted by severity.
+    pub(super) fn hotspot_bar(&self, tier: RiskTier, filled: usize, cells: usize) -> String {
+        let (_, fg, _) = tier_palette(tier);
+        format!(
+            "{}{}",
+            self.paint("█".repeat(filled), fg),
+            self.paint("░".repeat(cells.saturating_sub(filled)), "2;37")
+        )
+    }
+
     /// A full-width section divider: `── LABEL ───────────────`.
     pub(super) fn rule(&self, label: &str) -> String {
         let label = label.to_uppercase();

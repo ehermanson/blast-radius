@@ -46,6 +46,8 @@ pub struct RootImpact {
 pub struct RootImpactFile {
     pub path: String,
     pub endpoint: bool,
+    /// Hops from the changed file (1 == direct consumer).
+    pub depth: usize,
 }
 
 /// Map a repo-relative path to the package that owns it: the longest matching
@@ -103,9 +105,7 @@ pub struct Summary {
 
 /// The headline blast-radius verdict. Ordered least-to-most severe so callers
 /// can gate on `tier >= threshold` (see `--fail-on-risk`).
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, ValueEnum,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, ValueEnum)]
 #[serde(rename_all = "snake_case")]
 pub enum RiskTier {
     #[default]

@@ -154,8 +154,9 @@ pub(crate) fn resolve_package_export(package: &PackageInfo, export_key: &str) ->
         .iter()
         .filter(|mapping| mapping.key.contains('*'))
         .collect();
-    wildcards
-        .sort_by_key(|mapping| std::cmp::Reverse(mapping.key.split('*').next().unwrap_or("").len()));
+    wildcards.sort_by_key(|mapping| {
+        std::cmp::Reverse(mapping.key.split('*').next().unwrap_or("").len())
+    });
 
     for mapping in wildcards {
         if let Some(captures) = match_alias(&mapping.key, export_key) {

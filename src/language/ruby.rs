@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 
 use crate::parse::{ModuleFacts, parse_ruby_module};
-use crate::resolve::{ResolveCtx, Resolution};
+use crate::resolve::{Resolution, ResolveCtx};
 
 use super::LanguageAdapter;
 

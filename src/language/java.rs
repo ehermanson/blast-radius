@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 
 use crate::parse::{ModuleFacts, parse_java_module};
-use crate::resolve::{ResolveCtx, Resolution};
+use crate::resolve::{Resolution, ResolveCtx};
 
 use super::LanguageAdapter;
 
@@ -40,6 +40,9 @@ fn resolve_java_import(ctx: &ResolveCtx, specifier: &str) -> Option<PathBuf> {
     }
 
     ctx.suffix_index
-        .get(&PathBuf::from(format!("{}.java", specifier.replace('.', "/"))))
+        .get(&PathBuf::from(format!(
+            "{}.java",
+            specifier.replace('.', "/")
+        )))
         .cloned()
 }

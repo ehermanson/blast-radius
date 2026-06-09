@@ -445,7 +445,9 @@ fn file_mode_reports_tree_output() {
         .stdout(predicate::str::contains("IMPACTED FILES"))
         .stdout(predicate::str::contains("confidence:"))
         .stdout(predicate::str::contains("packages/ui"))
-        .stdout(predicate::str::contains("apps/storefront/src/App.tsx"));
+        // Files are listed as bare names under their directory's header.
+        .stdout(predicate::str::contains("apps/storefront"))
+        .stdout(predicate::str::contains("App.tsx"));
 
     // The full cascade tree is available behind --verbose.
     AssertCommand::cargo_bin("blast-radius")

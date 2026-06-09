@@ -14,7 +14,7 @@ use std::sync::OnceLock;
 use anyhow::Result;
 
 use crate::parse::ModuleFacts;
-use crate::resolve::{ResolveCtx, Resolution};
+use crate::resolve::{Resolution, ResolveCtx};
 
 mod javascript;
 use javascript::JavaScriptAdapter;

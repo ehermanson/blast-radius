@@ -17,13 +17,15 @@ asks: _"how far does this change reach?"_
 
   ── IMPACTED FILES · 6 IN 2 PACKAGES ──────────────────────
   apps/storefront (3)
-    apps/storefront/src/App.tsx  ◎ endpoint
-    apps/storefront/src/LegacyButtonCard.jsx
-    apps/storefront/src/PromoCard.tsx
+    src/ (3)
+      App.tsx  ◎ endpoint
+      LegacyButtonCard.jsx
+      PromoCard.tsx
   packages/ui (3)
-    packages/ui/src/Card.tsx
-    packages/ui/src/Toolbar.tsx
-    packages/ui/src/index.ts
+    src/ (3)
+      Card.tsx
+      Toolbar.tsx
+      index.ts
 ```
 
 Use it to:
@@ -101,9 +103,14 @@ Lefthook, and the `pre-commit` framework.
 ## Reading the output
 
 The default `tree` output leads with a **risk verdict** — `minor`, `moderate`,
-`risky`, or `high` — plus a meter and the counts behind it, then lists the
-impacted files grouped by package. Files marked `◎ endpoint` are entry points
-(apps, routes, pages) — a signal the change can reach something user-facing.
+`risky`, or `high` — plus a meter and the counts behind it. For larger blast
+radii a **hotspots** chart follows, showing the directories with the most
+impacted files, so you can see where the change lands before reading any paths.
+
+The impacted files are then listed grouped by package and directory. Files
+marked `◎ endpoint` are leaves nothing else depends on (apps, routes, pages) —
+a signal the change can reach something user-facing. Past 200 impacted files
+the per-file lists collapse to directory rollups; pass `-v` to list every file.
 
 The last line reports **confidence**: how many files were scanned and whether
 any import edges were ambiguous, so you know how much to trust the result.

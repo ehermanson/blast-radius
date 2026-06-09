@@ -6,7 +6,7 @@ use anyhow::Result;
 use crate::fs::TsConfigPath;
 use crate::parse::{ModuleFacts, parse_javascript_module};
 use crate::resolve::{
-    ResolveCtx, Resolution, apply_alias_target, clean_path, match_alias, package_specifier_parts,
+    Resolution, ResolveCtx, apply_alias_target, clean_path, match_alias, package_specifier_parts,
     resolve_package_export,
 };
 

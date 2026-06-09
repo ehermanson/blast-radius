@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 
 use crate::parse::{ModuleFacts, parse_python_module};
-use crate::resolve::{ResolveCtx, Resolution, clean_path};
+use crate::resolve::{Resolution, ResolveCtx, clean_path};
 
 use super::LanguageAdapter;
 
