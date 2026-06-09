@@ -64,11 +64,40 @@ pub(super) fn module_facts_from_javascript_module(
                         is_ambiguous: true,
                     });
                 }
+                ModuleDecl::TsImportEquals(import_equals) => {
+                    // `import x = require('./y')` binds the whole CommonJS
+                    // module value, like `const x = require('./y')`.
+                    if let TsModuleRef::TsExternalModuleRef(module_ref) = &import_equals.module_ref
+                    {
+                        facts.imports.push(ImportFact {
+                            source: module_ref.expr.value.to_string_lossy().to_string(),
+                            local: import_equals.id.sym.to_string(),
+                            imported: ImportTarget::Default,
+                            kind: ImportKind::CommonJs,
+                            type_only: import_equals.is_type_only,
+                        });
+                    }
+                }
+                ModuleDecl::TsExportAssignment(assignment) => {
+                    // `export =` exports the file's value; model it as the
+                    // default export.
+                    let local = match &*assignment.expr {
+                        Expr::Ident(ident) => Some(ident.sym.to_string()),
+                        _ => None,
+                    };
+                    facts.exports.push(ExportFact {
+                        exported: "default".to_string(),
+                        local,
+                        kind: ExportKind::Default,
+                    });
+                }
                 _ => {}
             },
-            ModuleItem::Stmt(stmt) => collect_commonjs_from_stmt(stmt, &mut facts),
+            ModuleItem::Stmt(stmt) => collect_commonjs_export_from_stmt(stmt, &mut facts),
         }
     }
+
+    let require_locals = collect_require_imports(module, &mut facts);
 
     let imported_locals: BTreeSet<String> = facts
         .imports
@@ -88,6 +117,8 @@ pub(super) fn module_facts_from_javascript_module(
     facts.jsx_locals = usage_collector.jsx_locals;
     facts.namespace_member_usage = usage_collector.namespace_member_usage;
     facts.jsx_namespace_member_usage = usage_collector.jsx_namespace_member_usage;
+    // Value-position require call sites are themselves the usage.
+    facts.used_locals.extend(require_locals);
 
     collect_dynamic_imports(module, &mut facts);
 
@@ -184,6 +215,13 @@ fn syntax_for_path(path: &Path) -> Syntax {
 
 fn collect_import_decl(import: &ImportDecl, facts: &mut ModuleFacts) {
     let source = import.src.value.to_string_lossy().to_string();
+
+    // `import './setup'` binds nothing but still executes the module.
+    if import.specifiers.is_empty() {
+        let fact = side_effect_import(source, ImportKind::Esm, facts.imports.len());
+        facts.imports.push(fact);
+        return;
+    }
 
     for specifier in &import.specifiers {
         match specifier {
@@ -306,42 +344,108 @@ fn collect_named_export(named: &NamedExport, facts: &mut ModuleFacts) {
     }
 }
 
-fn collect_commonjs_from_stmt(stmt: &Stmt, facts: &mut ModuleFacts) {
-    match stmt {
-        Stmt::Decl(Decl::Var(variable)) => {
-            for declarator in &variable.decls {
-                if let Some(init) = &declarator.init {
-                    collect_require_import(&declarator.name, init, facts);
-                }
-            }
-        }
-        Stmt::Expr(expr_stmt) => {
-            if let Expr::Assign(assign) = &*expr_stmt.expr {
-                collect_commonjs_export(assign, facts);
-            }
-        }
-        _ => {}
+fn collect_commonjs_export_from_stmt(stmt: &Stmt, facts: &mut ModuleFacts) {
+    if let Stmt::Expr(expr_stmt) = stmt
+        && let Expr::Assign(assign) = &*expr_stmt.expr
+    {
+        collect_commonjs_export(assign, facts);
     }
 }
 
-fn collect_require_import(name: &Pat, init: &Expr, facts: &mut ModuleFacts) {
-    let Expr::Call(call) = init else {
-        return;
+fn side_effect_import(source: String, kind: ImportKind, index: usize) -> ImportFact {
+    ImportFact {
+        source,
+        local: format!("side-effect:{index}"),
+        imported: ImportTarget::SideEffect,
+        kind,
+        type_only: false,
+    }
+}
+
+/// Collect `require("...")` calls anywhere in the module, not just top-level
+/// declarations: lazy in-function requires and bare `require('./x')` statements
+/// also create edges. Returns the synthetic locals for value-position calls,
+/// which the caller marks used after real usage is collected (the call site is
+/// the usage, mirroring dynamic imports).
+fn collect_require_imports(module: &Module, facts: &mut ModuleFacts) -> Vec<String> {
+    let mut collector = RequireCollector {
+        facts,
+        synthetic_locals: Vec::new(),
+        seen_value_sources: BTreeSet::new(),
     };
-    let Callee::Expr(callee) = &call.callee else {
-        return;
-    };
-    let Expr::Ident(ident) = &**callee else {
-        return;
-    };
-    if ident.sym != *"require" || call.args.len() != 1 {
-        return;
+    module.visit_with(&mut collector);
+    collector.synthetic_locals
+}
+
+struct RequireCollector<'a> {
+    facts: &'a mut ModuleFacts,
+    synthetic_locals: Vec<String>,
+    seen_value_sources: BTreeSet<String>,
+}
+
+impl Visit for RequireCollector<'_> {
+    fn visit_var_declarator(&mut self, declarator: &VarDeclarator) {
+        // A binding gets real locals so usage gates the edge.
+        if let Some(init) = &declarator.init
+            && let Some(source) = require_call_source(init)
+        {
+            collect_require_binding(&declarator.name, source, self.facts);
+            declarator.name.visit_with(self);
+            return;
+        }
+        declarator.visit_children_with(self);
     }
 
-    let Some(source) = literal_string(&call.args[0].expr) else {
-        return;
-    };
+    fn visit_expr_stmt(&mut self, stmt: &ExprStmt) {
+        // A bare `require('./x');` statement is a side-effect import.
+        if let Some(source) = require_call_source(&stmt.expr) {
+            let fact = side_effect_import(source, ImportKind::CommonJs, self.facts.imports.len());
+            self.facts.imports.push(fact);
+            return;
+        }
+        stmt.visit_children_with(self);
+    }
 
+    fn visit_call_expr(&mut self, call: &CallExpr) {
+        call.visit_children_with(self);
+        // Any other value-position require depends on the whole module value.
+        if let Some(source) = call_require_source(call)
+            && self.seen_value_sources.insert(source.clone())
+        {
+            let local = format!("require():{}", self.synthetic_locals.len());
+            self.facts.imports.push(ImportFact {
+                source,
+                local: local.clone(),
+                imported: ImportTarget::Namespace,
+                kind: ImportKind::CommonJs,
+                type_only: false,
+            });
+            self.synthetic_locals.push(local);
+        }
+    }
+}
+
+fn require_call_source(expr: &Expr) -> Option<String> {
+    let Expr::Call(call) = expr else {
+        return None;
+    };
+    call_require_source(call)
+}
+
+fn call_require_source(call: &CallExpr) -> Option<String> {
+    let Callee::Expr(callee) = &call.callee else {
+        return None;
+    };
+    let Expr::Ident(ident) = &**callee else {
+        return None;
+    };
+    if ident.sym != *"require" || call.args.len() != 1 {
+        return None;
+    }
+    literal_string(&call.args[0].expr)
+}
+
+fn collect_require_binding(name: &Pat, source: String, facts: &mut ModuleFacts) {
     match name {
         Pat::Ident(binding) => facts.imports.push(ImportFact {
             source,
@@ -516,5 +620,128 @@ fn prop_name_to_string(prop: &PropName) -> Option<String> {
         PropName::Str(value) => Some(value.value.to_string_lossy().to_string()),
         PropName::Num(number) => Some(number.value.to_string()),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::*;
+
+    fn parse(name: &str, source: &str) -> ModuleFacts {
+        parse_javascript_module(Path::new(name), source).unwrap()
+    }
+
+    #[test]
+    fn collects_side_effect_imports() {
+        let facts = parse(
+            "setup.js",
+            "import './polyfills';\nimport './styles.css';\n",
+        );
+
+        for source in ["./polyfills", "./styles.css"] {
+            let import = facts
+                .imports
+                .iter()
+                .find(|import| import.source == source)
+                .expect("side-effect import should be collected");
+            assert_eq!(import.imported, ImportTarget::SideEffect);
+            assert_eq!(import.kind, ImportKind::Esm);
+        }
+    }
+
+    #[test]
+    fn collects_ts_import_equals_and_export_assignment() {
+        let facts = parse(
+            "legacy.ts",
+            "import lib = require('./lib');\nexport = lib;\n",
+        );
+
+        let import = facts
+            .imports
+            .iter()
+            .find(|import| import.source == "./lib")
+            .expect("import-equals should be collected");
+        assert_eq!(import.local, "lib");
+        assert_eq!(import.imported, ImportTarget::Default);
+        assert_eq!(import.kind, ImportKind::CommonJs);
+        assert!(!import.type_only);
+
+        let export = facts
+            .exports
+            .iter()
+            .find(|export| export.exported == "default")
+            .expect("export assignment should export the file's value");
+        assert_eq!(export.local.as_deref(), Some("lib"));
+    }
+
+    #[test]
+    fn collects_requires_anywhere_in_the_module() {
+        let facts = parse(
+            "server.cjs",
+            r#"
+require('./register');
+function load() {
+  const helper = require('./helper');
+  return helper;
+}
+setTimeout(() => require('./worker').start(), 0);
+"#,
+        );
+
+        let register = facts
+            .imports
+            .iter()
+            .find(|import| import.source == "./register")
+            .expect("bare require should be a side-effect import");
+        assert_eq!(register.imported, ImportTarget::SideEffect);
+        assert_eq!(register.kind, ImportKind::CommonJs);
+
+        let helper = facts
+            .imports
+            .iter()
+            .find(|import| import.source == "./helper")
+            .expect("in-function require should keep its binding");
+        assert_eq!(helper.local, "helper");
+        assert_eq!(helper.imported, ImportTarget::Default);
+        assert_eq!(helper.kind, ImportKind::CommonJs);
+        assert!(facts.used_locals.contains("helper"));
+
+        let worker = facts
+            .imports
+            .iter()
+            .find(|import| import.source == "./worker")
+            .expect("value-position require should be collected");
+        assert_eq!(worker.imported, ImportTarget::Namespace);
+        assert_eq!(worker.kind, ImportKind::CommonJs);
+        // The call site is the usage, so the edge must count in the walk.
+        assert!(facts.used_locals.contains(&worker.local));
+    }
+
+    #[test]
+    fn keeps_top_level_destructured_require_locals() {
+        let facts = parse(
+            "format.cjs",
+            "const { format, parse: parseDate } = require('./dates');\nmodule.exports = { format, parseDate };\n",
+        );
+
+        assert!(facts.imports.iter().any(|import| {
+            import.source == "./dates" && import.imported == ImportTarget::Name("format".into())
+        }));
+        assert!(facts.imports.iter().any(|import| {
+            import.source == "./dates"
+                && import.local == "parseDate"
+                && import.imported == ImportTarget::Name("parse".into())
+        }));
+        // No duplicate namespace fact for the same call.
+        assert_eq!(
+            facts
+                .imports
+                .iter()
+                .filter(|import| import.source == "./dates")
+                .count(),
+            2
+        );
     }
 }
