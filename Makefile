@@ -1,6 +1,6 @@
 SHELL := /bin/zsh
 
-.PHONY: test test-python test-rust test-components test-ruby test-java test-all-languages coverage coverage-gate perf quality quality-python quality-rust quality-components quality-ruby quality-java stress-chakra stress-python-demo stress-fastapi stress-rust-demo stress-components stress-ruby-demo stress-java-demo smoke-mui build metrics fetch-examples
+.PHONY: test test-python test-rust test-components test-ruby test-java test-all-languages coverage coverage-gate perf quality quality-python quality-rust quality-components quality-ruby quality-java stress-chakra stress-python-demo stress-fastapi stress-rust-demo stress-components stress-ruby-demo stress-java-demo smoke-mui build metrics fetch-examples lint fmt fmt-check
 
 build:
 	cargo build
@@ -8,6 +8,15 @@ build:
 # Fetch the large vendored snapshots (Chakra UI, FastAPI) that are not committed.
 fetch-examples:
 	./scripts/fetch-examples.sh
+
+lint:
+	cargo clippy --all-targets --all-features -- -D warnings
+
+fmt:
+	cargo fmt
+
+fmt-check:
+	cargo fmt --check
 
 test:
 	cargo test
@@ -73,7 +82,7 @@ perf: build
 metrics: build fetch-examples
 	node scripts/collect_metrics.mjs
 
-quality: test coverage-gate stress-chakra
+quality: fmt-check lint test coverage-gate stress-chakra
 
 quality-python: test-python stress-python-demo stress-fastapi
 
