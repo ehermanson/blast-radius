@@ -1,0 +1,244 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  FAT_FEATURES: python,rust,vue,svelte,ruby,java
+
+permissions:
+  contents: read
+
+jobs:
+  # Fail fast if the tag doesn't match Cargo.toml, then run the fat test
+  # suite once as a release smoke gate before burning matrix minutes.
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      npm_token_present: ${{ steps.npm.outputs.present }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify tag matches Cargo.toml version
+        id: version
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          CARGO_VERSION="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "blast-radius") | .version')"
+          if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match Cargo.toml version ${CARGO_VERSION}. Bump Cargo.toml (and Cargo.lock via 'cargo update -p blast-radius'), commit, and re-tag."
+            exit 1
+          fi
+          echo "Releasing version ${TAG_VERSION}"
+          echo "version=${TAG_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Detect NPM_TOKEN secret
+        id: npm
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -n "$NPM_TOKEN" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::NPM_TOKEN secret not set; npm publish will be skipped."
+          fi
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Fetch example snapshots
+        run: ./scripts/fetch-examples.sh
+
+      - name: Run tests (fat feature set)
+        run: cargo test --locked --features ${{ env.FAT_FEATURES }}
+
+  build:
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: x86_64-apple-darwin
+            os: macos-13
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          target: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install musl tools
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - name: Build release binary
+        run: cargo build --release --locked --target ${{ matrix.target }} --features ${{ env.FAT_FEATURES }}
+
+      - name: Strip binary
+        if: runner.os != 'Windows'
+        run: strip "target/${{ matrix.target }}/release/blast-radius"
+
+      - name: Assemble archive (unix)
+        if: runner.os != 'Windows'
+        run: |
+          ARCHIVE="blast-radius-v${VERSION}-${{ matrix.target }}.tar.gz"
+          mkdir -p staging
+          cp "target/${{ matrix.target }}/release/blast-radius" LICENSE README.md staging/
+          tar -czf "$ARCHIVE" -C staging blast-radius LICENSE README.md
+          shasum -a 256 "$ARCHIVE"
+
+      - name: Assemble archive (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $archive = "blast-radius-v$env:VERSION-${{ matrix.target }}.zip"
+          New-Item -ItemType Directory -Path staging | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/blast-radius.exe", LICENSE, README.md staging/
+          Compress-Archive -Path staging/* -DestinationPath $archive
+          Get-FileHash $archive -Algorithm SHA256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            blast-radius-v*.tar.gz
+            blast-radius-v*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    needs: [check, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate sha256sums.txt
+        run: |
+          cd dist
+          sha256sum blast-radius-v* > sha256sums.txt
+          cat sha256sums.txt
+
+      - name: Extract release notes from CHANGELOG
+        run: |
+          awk -v ver="$VERSION" '
+            /^## \[/ {
+              if (found) exit
+              if (index($0, "[" ver "]") > 0) { found = 1; next }
+            }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          if [ -s notes.md ]; then
+            echo "Using CHANGELOG section for v$VERSION as release notes."
+          else
+            echo "::warning::No CHANGELOG section found for v$VERSION; falling back to generated notes."
+          fi
+
+      - name: Create GitHub Release
+        run: |
+          NOTES_ARGS=(--generate-notes)
+          if [ -s notes.md ]; then
+            NOTES_ARGS=(--notes-file notes.md)
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            --title "blast-radius v$VERSION" \
+            "${NOTES_ARGS[@]}" \
+            dist/*
+
+  npm-publish:
+    needs: [check, release]
+    # secrets.* is unavailable in job-level `if`, so the check job exports a
+    # boolean output instead.
+    if: needs.check.outputs.npm_token_present == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm --provenance
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Extract binaries per target
+        run: |
+          mkdir -p extracted
+          for target in \
+            x86_64-unknown-linux-gnu \
+            aarch64-unknown-linux-gnu \
+            x86_64-unknown-linux-musl \
+            x86_64-apple-darwin \
+            aarch64-apple-darwin \
+            x86_64-pc-windows-msvc
+          do
+            mkdir -p "extracted/$target"
+            case "$target" in
+              *windows*)
+                unzip -o "artifacts/$target/blast-radius-v${VERSION}-${target}.zip" blast-radius.exe -d "extracted/$target"
+                ;;
+              *)
+                tar -xzf "artifacts/$target/blast-radius-v${VERSION}-${target}.tar.gz" -C "extracted/$target" blast-radius
+                ;;
+            esac
+          done
+          ls -lR extracted
+
+      - name: Build platform packages
+        run: node npm/build-platform-packages.mjs --version "$VERSION" --artifacts-dir extracted
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          publish() {
+            # Provenance requires a public repo and OIDC; fall back without it
+            # rather than blocking the release.
+            npm publish "$1" --provenance --access public \
+              || npm publish "$1" --access public
+          }
+          # Platform packages first so the wrapper's optionalDependencies all
+          # resolve the moment it lands.
+          for pkg in npm/dist/*/; do
+            publish "$pkg"
+          done
+          publish npm/blast-radius-cli

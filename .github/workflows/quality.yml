@@ -57,6 +57,21 @@ jobs:
       - name: Run all-language tests
         run: cargo test --features python,rust,vue,svelte,ruby,java
 
+  # Release binaries ship for Windows; exercise the real backslash path
+  # handling (package/directory grouping) on a native runner.
+  windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run tests
+        run: cargo test
+
   quality:
     runs-on: ubuntu-latest
 
