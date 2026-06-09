@@ -92,21 +92,23 @@ pub(super) fn format_mode(mode: &AnalysisMode) -> &'static str {
     }
 }
 
+/// Must mirror `analyze::file_id`: ids embed `/`-normalized absolute paths.
+fn rebuilt_file_id(file: &std::path::Path) -> String {
+    crate::graph::normalize_separators(format!("file:{}", file.display()))
+}
+
 fn preferred_root(result: &AnalysisResult) -> Option<String> {
     match &result.target {
         AnalysisTarget::Export { file, .. } => {
-            let file_id = format!("file:{}", file.display());
+            let file_id = rebuilt_file_id(file);
             find_existing_node(result, &[&file_id])
         }
         AnalysisTarget::File { file } => {
-            let file_id = format!("file:{}", file.display());
+            let file_id = rebuilt_file_id(file);
             find_existing_node(result, &[&file_id])
         }
         AnalysisTarget::Files { files } => {
-            let preferred: Vec<String> = files
-                .iter()
-                .map(|file| format!("file:{}", file.display()))
-                .collect();
+            let preferred: Vec<String> = files.iter().map(|file| rebuilt_file_id(file)).collect();
             let preferred_refs: Vec<&str> = preferred.iter().map(String::as_str).collect();
             find_existing_node(result, &preferred_refs)
         }
