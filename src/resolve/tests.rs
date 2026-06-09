@@ -350,7 +350,11 @@ fn resolves_python_src_layout_package_imports() {
     fs::create_dir_all(dir.path().join("src/my_pkg")).unwrap();
     fs::write(dir.path().join("src/my_pkg/__init__.py"), "").unwrap();
     fs::write(dir.path().join("src/my_pkg/models.py"), "class User: pass").unwrap();
-    fs::write(dir.path().join("src/my_pkg/main.py"), "import my_pkg.models").unwrap();
+    fs::write(
+        dir.path().join("src/my_pkg/main.py"),
+        "import my_pkg.models",
+    )
+    .unwrap();
 
     let context = RepoContext::discover(dir.path()).unwrap();
     let resolver = Resolver::new(&context).unwrap();

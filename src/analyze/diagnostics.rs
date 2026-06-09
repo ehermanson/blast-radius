@@ -122,18 +122,27 @@ mod tests {
             "./styled-system/css",
             "./pkg/dist/esm/index",
         ] {
-            assert!(!should_count_unresolved_import(&import(source, false), &ignore));
+            assert!(!should_count_unresolved_import(
+                &import(source, false),
+                &ignore
+            ));
         }
     }
 
     #[test]
     fn skips_type_only_unresolved_imports() {
-        assert!(!should_count_unresolved_import(&import("./types", true), &[]));
+        assert!(!should_count_unresolved_import(
+            &import("./types", true),
+            &[]
+        ));
     }
 
     #[test]
     fn counts_regular_runtime_imports() {
-        assert!(should_count_unresolved_import(&import("./missing", false), &[]));
+        assert!(should_count_unresolved_import(
+            &import("./missing", false),
+            &[]
+        ));
         // The same specifier with no matching ignore pattern is still counted.
         assert!(should_count_unresolved_import(
             &import("./missing", false),

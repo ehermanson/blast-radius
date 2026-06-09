@@ -342,6 +342,7 @@ pub(super) fn compute_root_impacts(
                 files.push(RootImpactFile {
                     path: relative_label(repo_root, file),
                     endpoint,
+                    depth: state.depth,
                 });
             }
             files.sort_by(|a, b| a.path.cmp(&b.path));

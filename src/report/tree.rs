@@ -84,6 +84,20 @@ pub(super) fn render_tree(result: &AnalysisResult, verbose: bool) -> String {
         ));
     }
 
+    // Where the impact lands: directory counts give the shape of the blast at
+    // a glance, before the reader commits to the full file list.
+    if assessment.affected >= HOTSPOT_MIN_FILES {
+        let hotspots = hotspot_dirs(result);
+        if hotspots.len() >= 2 {
+            lines.push(String::new());
+            lines.push(theme.rule("hotspots"));
+            render_hotspots(&hotspots, assessment.tier, &theme, &mut lines);
+        }
+    }
+
+    // Past this size a per-file list stops being readable, so collapse to the
+    // directory rollups unless the user explicitly asks for everything.
+    let list_files = verbose || assessment.affected <= MAX_LISTED_FILES;
     if multi {
         // Attribute impacted files to the input that caused them.
         lines.push(String::new());
@@ -92,10 +106,11 @@ pub(super) fn render_tree(result: &AnalysisResult, verbose: bool) -> String {
             if index > 0 {
                 lines.push(String::new());
             }
-            render_root_block(root, &result.workspaces, &theme, &mut lines);
+            render_root_block(root, &result.workspaces, list_files, &theme, &mut lines);
         }
+        push_list_caveats(assessment.affected > 0, list_files, &theme, &mut lines);
     } else {
-        // Single change: one flat list, grouped by package.
+        // Single change: one list, grouped by package, then by directory.
         let groups = group_by_package(result);
         if !groups.is_empty() {
             lines.push(String::new());
@@ -105,7 +120,8 @@ pub(super) fn render_tree(result: &AnalysisResult, verbose: bool) -> String {
                 assessment.packages,
                 plural(assessment.packages)
             )));
-            render_package_groups(&groups, 2, &theme, &mut lines);
+            render_package_groups(&groups, 2, list_files, &theme, &mut lines);
+            push_list_caveats(true, list_files, &theme, &mut lines);
         }
     }
 
@@ -239,6 +255,7 @@ struct ImpactedFile {
 fn render_root_block(
     root: &RootImpact,
     workspaces: &[Workspace],
+    list_files: bool,
     theme: &Theme,
     lines: &mut Vec<String>,
 ) {
@@ -267,13 +284,16 @@ fn render_root_block(
         }),
         workspaces,
     );
-    render_package_groups(&groups, 4, theme, lines);
+    render_package_groups(&groups, 4, list_files, theme, lines);
 }
 
-/// Render package groups (header + file paths) at a given indent.
+/// Render package groups at a given indent: each package header, then its
+/// directories busiest-first, then (unless collapsed) the files themselves as
+/// bare names — the directory header already carries the shared prefix.
 fn render_package_groups(
     groups: &[PackageGroup],
     indent: usize,
+    list_files: bool,
     theme: &Theme,
     lines: &mut Vec<String>,
 ) {
@@ -284,21 +304,39 @@ fn render_package_groups(
             theme.pkg(&group.label),
             theme.count(&format!("({})", group.files.len()))
         ));
-        for file in group.files.iter().take(FILES_PER_PACKAGE) {
-            let marker = if file.endpoint {
-                format!("  {}", theme.endpoint("◎ endpoint"))
-            } else {
-                String::new()
-            };
-            lines.push(format!("{pad}  {}{}", theme.path(&file.path), marker));
-        }
-        if group.files.len() > FILES_PER_PACKAGE {
+        for dir in dir_groups(group) {
             lines.push(format!(
-                "{pad}  {}",
-                theme.muted(&format!("+{} more", group.files.len() - FILES_PER_PACKAGE))
+                "{pad}  {} {}",
+                theme.path(&dir.label),
+                theme.muted(&format!("({})", dir.files.len()))
             ));
+            if !list_files {
+                continue;
+            }
+            for (file, name) in &dir.files {
+                let marker = if file.endpoint {
+                    format!("  {}", theme.endpoint("◎ endpoint"))
+                } else {
+                    String::new()
+                };
+                lines.push(format!("{pad}    {}{}", theme.path(name), marker));
+            }
         }
     }
+}
+
+/// The how-to-expand note under a collapsed file list.
+fn push_list_caveats(any_files: bool, list_files: bool, theme: &Theme, lines: &mut Vec<String>) {
+    if !any_files || list_files {
+        return;
+    }
+    lines.push(String::new());
+    lines.push(format!(
+        "  {}",
+        theme.muted(&format!(
+            "file lists collapsed past {MAX_LISTED_FILES} impacted files · -v to list every file"
+        ))
+    ));
 }
 
 struct PackageGroup {
@@ -306,8 +344,131 @@ struct PackageGroup {
     files: Vec<ImpactedFile>,
 }
 
-/// The number of impacted files to list per package before collapsing the rest.
-const FILES_PER_PACKAGE: usize = 12;
+/// One directory's worth of a package's impacted files: the directory label
+/// (relative to the package) and each file paired with its bare name.
+struct DirGroup<'a> {
+    label: String,
+    files: Vec<(&'a ImpactedFile, String)>,
+}
+
+/// Bucket a package's files by directory, busiest directory first.
+fn dir_groups(group: &PackageGroup) -> Vec<DirGroup<'_>> {
+    let prefix = if group.label == "." {
+        String::new()
+    } else {
+        format!("{}/", group.label)
+    };
+
+    let mut buckets: BTreeMap<String, Vec<(&ImpactedFile, String)>> = BTreeMap::new();
+    for file in &group.files {
+        let local = file.path.strip_prefix(&prefix).unwrap_or(&file.path);
+        let (dir, name) = split_dir(local);
+        buckets
+            .entry(dir.to_string())
+            .or_default()
+            .push((file, name.to_string()));
+    }
+
+    let mut dirs: Vec<DirGroup> = buckets
+        .into_iter()
+        .map(|(dir, files)| DirGroup {
+            label: dir_label(&dir),
+            files,
+        })
+        .collect();
+    dirs.sort_by(|a, b| {
+        b.files
+            .len()
+            .cmp(&a.files.len())
+            .then(a.label.cmp(&b.label))
+    });
+    dirs
+}
+
+/// Impacted-file lists longer than this collapse to directory rollups unless
+/// `-v` is passed — past that size the per-file list stops being readable.
+const MAX_LISTED_FILES: usize = 200;
+
+/// How many directories the hotspot chart shows.
+const HOTSPOT_ROWS: usize = 6;
+
+/// Below this many impacted files the list itself is glanceable, so a hotspot
+/// chart would just repeat it.
+const HOTSPOT_MIN_FILES: usize = 8;
+
+/// Affected-file counts per directory, busiest first — the shape of the blast.
+fn hotspot_dirs(result: &AnalysisResult) -> Vec<(String, usize)> {
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for node in result
+        .nodes
+        .iter()
+        .filter(|node| node.kind == NodeKind::File && node.depth >= 1)
+    {
+        let (dir, _) = split_dir(&node.label);
+        *counts.entry(dir.to_string()).or_default() += 1;
+    }
+    let mut dirs: Vec<(String, usize)> = counts.into_iter().collect();
+    dirs.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    dirs
+}
+
+fn render_hotspots(
+    dirs: &[(String, usize)],
+    tier: RiskTier,
+    theme: &Theme,
+    lines: &mut Vec<String>,
+) {
+    const BAR_CELLS: usize = 14;
+    const LABEL_MAX: usize = 36;
+
+    let shown = &dirs[..dirs.len().min(HOTSPOT_ROWS)];
+    let max = shown.iter().map(|(_, count)| *count).max().unwrap_or(1);
+    let labels: Vec<String> = shown
+        .iter()
+        .map(|(dir, _)| clip_left(&dir_label(dir), LABEL_MAX))
+        .collect();
+    let width = labels.iter().map(|l| l.chars().count()).max().unwrap_or(0);
+
+    for ((_, count), label) in shown.iter().zip(&labels) {
+        let filled = (count * BAR_CELLS).div_ceil(max).min(BAR_CELLS);
+        lines.push(format!(
+            "  {}{}  {} {}",
+            theme.path(label),
+            " ".repeat(width - label.chars().count()),
+            theme.hotspot_bar(tier, filled, BAR_CELLS),
+            theme.count(&format!("{:>3}", count)),
+        ));
+    }
+    if dirs.len() > shown.len() {
+        lines.push(format!(
+            "  {}",
+            theme.muted(&format!("+{} more directories", dirs.len() - shown.len()))
+        ));
+    }
+}
+
+/// Split a path into its directory and bare file name.
+fn split_dir(path: &str) -> (&str, &str) {
+    path.rsplit_once('/').unwrap_or(("", path))
+}
+
+fn dir_label(dir: &str) -> String {
+    if dir.is_empty() {
+        "./".to_string()
+    } else {
+        format!("{dir}/")
+    }
+}
+
+/// Truncate from the left, keeping the most specific path segments.
+fn clip_left(text: &str, max: usize) -> String {
+    let count = text.chars().count();
+    if count <= max {
+        return text.to_string();
+    }
+    let tail: String = text.chars().skip(count + 1 - max).collect();
+    format!("…{tail}")
+}
 
 fn group_by_package(result: &AnalysisResult) -> Vec<PackageGroup> {
     let files = result

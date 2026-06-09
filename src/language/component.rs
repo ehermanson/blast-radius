@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::Result;
 
 use crate::parse::{ModuleFacts, parse_component_module};
-use crate::resolve::{ResolveCtx, Resolution};
+use crate::resolve::{Resolution, ResolveCtx};
 
 use super::LanguageAdapter;
 use super::javascript::{is_internal_javascript_specifier, resolve_javascript_import};
