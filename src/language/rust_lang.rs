@@ -71,9 +71,55 @@ fn resolve_rust_import(ctx: &ResolveCtx, importer: &Path, specifier: &str) -> Op
                 return Some(path);
             }
             let base = rust_child_module_base(importer).join(parts.join("/"));
-            try_resolve_rust_module_candidate(ctx, &base)
+            if let Some(path) = try_resolve_rust_module_candidate(ctx, &base) {
+                return Some(path);
+            }
+            resolve_rust_workspace_import(ctx, head, rest)
         }
     }
+}
+
+/// Resolve `use other_crate::...` against a sibling workspace crate, mapping
+/// the path head to a crate root via each crate's `Cargo.toml` package name
+/// (hyphens normalized to underscores, as in Rust paths).
+fn resolve_rust_workspace_import(ctx: &ResolveCtx, head: &str, rest: &[&str]) -> Option<PathBuf> {
+    let root = rust_workspace_crate_root(ctx, head)?;
+    if rest.is_empty() {
+        // `use other_crate::SomeItem` parses down to the bare crate path, which
+        // is the crate's entrypoint file.
+        for entry in ["lib.rs", "main.rs"] {
+            let candidate = clean_path(&root.join(entry));
+            if ctx.source_files.contains(&candidate) {
+                return Some(candidate);
+            }
+        }
+        return None;
+    }
+    try_resolve_rust_module_candidate(ctx, &root.join(rest.join("/")))
+}
+
+fn rust_workspace_crate_root(ctx: &ResolveCtx, name: &str) -> Option<PathBuf> {
+    for root in rust_crate_roots(ctx) {
+        let Some(package_dir) = root.parent() else {
+            continue;
+        };
+        if !package_dir.starts_with(&ctx.repo_root) {
+            continue;
+        }
+        let Ok(manifest) = std::fs::read_to_string(package_dir.join("Cargo.toml")) else {
+            continue;
+        };
+        if cargo_package_name(&manifest).is_some_and(|package| package.replace('-', "_") == name) {
+            return Some(root);
+        }
+    }
+    None
+}
+
+/// Extract `[package] name` from a Cargo.toml manifest.
+fn cargo_package_name(manifest: &str) -> Option<String> {
+    let manifest: toml::Value = manifest.parse().ok()?;
+    Some(manifest.get("package")?.get("name")?.as_str()?.to_string())
 }
 
 /// Resolve a path rooted at a crate root. `crate::` paths are anchored to the
@@ -156,6 +202,7 @@ fn rust_top_level_exists(ctx: &ResolveCtx, importer: &Path, specifier: &str) -> 
     crate_roots_for(ctx, importer)
         .into_iter()
         .any(|root| try_resolve_rust_module_candidate(ctx, &root.join(first)).is_some())
+        || rust_workspace_crate_root(ctx, first).is_some()
 }
 
 fn rust_child_module_base(importer: &Path) -> PathBuf {

@@ -28,7 +28,7 @@ path = "src/main.rs"
 default = ["javascript"]
 javascript = []
 python = ["dep:rustpython-parser"]
-rust = ["dep:syn"]
+rust = ["dep:syn", "dep:toml"]
 vue = []
 svelte = []
 ruby = []
@@ -48,6 +48,7 @@ swc_ecma_parser = { version = "41.0.0", features = ["typescript", "swc_ecma_visi
 swc_ecma_visit = "25.0.0"
 rustpython-parser = { version = "0.4", optional = true }
 syn = { version = "2.0", features = ["full"], optional = true }
+toml = { version = "0.8", optional = true }
 
 [dev-dependencies]
 tempfile = "3.10"
