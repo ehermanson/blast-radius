@@ -439,12 +439,15 @@ fn normalize_input_path(repo_root: &Path, path: &Path) -> Result<PathBuf> {
         .with_context(|| format!("failed to resolve input path {}", joined.display()))
 }
 
+/// Node ids embed absolute paths; normalize separators so JSON output (edge
+/// `from`/`to`, node ids) is stable across platforms. Consumers that rebuild
+/// ids from paths (e.g. the cascade renderer) must normalize the same way.
 pub(super) fn file_id(path: &Path) -> String {
-    format!("file:{}", path.display())
+    crate::graph::normalize_separators(format!("file:{}", path.display()))
 }
 
 pub(super) fn export_id(path: &Path, export: &str) -> String {
-    format!("export:{}#{export}", path.display())
+    crate::graph::normalize_separators(format!("export:{}#{export}", path.display()))
 }
 
 /// Render a path relative to the repo root, always with `/` separators —
