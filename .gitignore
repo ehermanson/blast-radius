@@ -9,3 +9,9 @@
 # tracked because .gitignore never untracks files already in the index.
 /examples/chakra-ui/
 /examples/fastapi/
+
+# Generated npm platform packages and local install/pack artifacts
+# (see npm/build-platform-packages.mjs)
+/npm/dist/
+/npm/**/node_modules/
+/npm/**/*.tgz
