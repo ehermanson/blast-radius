@@ -93,12 +93,15 @@ combined total — designed to receive staged filenames from hook managers like
 To turn the verdict into a gate, exit non-zero when a change reaches too far:
 
 ```bash
-# Fail (exit code 2) if a change touches more than 50 files
+# Fail (exit code 2) if a change impacts more than 50 downstream files
 blast-radius --fail-threshold 50 files "$@"
 
 # Or fail when the risk verdict hits "risky" or above
 blast-radius --fail-on-risk risky files "$@"
 ```
+
+Exit codes: `0` no gate tripped, `1` analysis error, `2` gate tripped, `64`
+usage error (so CI can tell a misspelled flag apart from a tripped gate).
 
 See `docs/local-toolchain.md` for ready-to-paste examples with `lint-staged`,
 Lefthook, and the `pre-commit` framework.
@@ -138,7 +141,7 @@ Global flags:
 | `--output <file>`                     | Write output to a file instead of stdout.           |
 | `--verbose`, `-v`                     | Show the full cascade tree.                         |
 | `--explain-unresolved`                | Group unresolved internal imports by likely cause.  |
-| `--fail-threshold <n>`                | Exit code 2 when more than `n` files are affected.  |
+| `--fail-threshold <n>`                | Exit code 2 when more than `n` downstream files are impacted (the changed files themselves are not counted). |
 | `--fail-on-risk <tier>`               | Exit code 2 when the verdict is at or above `tier`. |
 
 ### Output formats
@@ -152,9 +155,12 @@ Global flags:
 
 The default binary supports **JavaScript and TypeScript** (`js`, `jsx`, `ts`,
 `tsx`), including ESM imports/exports, CommonJS `require`/`module.exports`,
-default and named exports, barrels, `export *`, `tsconfig.json` path aliases,
-`baseUrl`, package `imports`/`exports`, `.js` specifiers backed by TypeScript
-source files, and cross-package resolution across workspace packages.
+default and named exports, barrels, `export *`, side-effect imports
+(`import './setup'`), `tsconfig.json` path aliases, `baseUrl`, `extends`
+chains (including `tsconfig.base.json`-style shared configs), package
+`imports`/`exports`, `.js` specifiers backed by TypeScript source files,
+`.d.ts` declaration files, and cross-package resolution across workspace
+packages.
 
 Other languages are compiled in at **build time** with Cargo features (there is
 no runtime `--language` flag — a binary scans whatever was built into it):
@@ -168,6 +174,10 @@ cargo install --path . --features java              # + Java
 cargo install --path . --features vue,svelte        # + Vue + Svelte
 cargo install --path . --features python,rust,vue,svelte,ruby,java   # everything
 ```
+
+Note: the Ruby adapter follows explicit `require`/`require_relative` only —
+Rails/Zeitwerk autoloading is not modeled, so autoloaded apps produce
+near-empty graphs (see `docs/language-support.md`).
 
 See `docs/language-support.md` for the multi-language architecture.
 

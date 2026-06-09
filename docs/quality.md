@@ -79,8 +79,8 @@ make quality-java
   Writes a machine-readable snapshot to `target/quality/metrics.json` for the
   monorepo fixture, Vite example, and Chakra UI example.
 - `make quality`
-  Runs the main local gate: tests, enforced coverage floor, and the Chakra
-  stress run.
+  Runs the main local gate: formatting check, clippy lint (`-D warnings`),
+  tests, enforced coverage floor, and the Chakra stress run.
 - `make quality-python`
   Runs Python feature tests plus Python stress cases.
 - `make quality-rust`
@@ -98,7 +98,10 @@ make quality-java
 - `unresolved_imports`
 - `ambiguous_edges`
 - `skipped_inputs` (paths passed to `files` mode that were not analyzable)
-- `total_affected_files` for known regression targets
+- `total_affected_files` for known regression targets (counts downstream
+  impacted files only — the changed file(s) themselves are excluded, so
+  `total == direct + transitive`; baselines recorded before this change are
+  higher by one per analysis root)
 - runtime on `monorepo-demo`, `vite-react-ts`, and `chakra-ui`
 - runtime on optional language fixtures when their features are enabled
 - `target/quality/metrics.json` drift over time
