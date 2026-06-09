@@ -135,27 +135,61 @@ impl ResolveCtx {
             }
         }
 
-        for extension in extensions {
-            let path = candidate.with_extension(extension);
-            if self.source_files.contains(&path) {
-                return Some(path);
-            }
-        }
+        let candidate_ext = candidate.extension().and_then(|ext| ext.to_str());
 
-        if let Some(ext) = candidate.extension().and_then(|ext| ext.to_str())
-            && !extensions.contains(&ext)
-        {
+        if candidate_ext.is_none() {
             for extension in extensions {
-                let path = candidate.with_extension(format!("{ext}.{extension}"));
+                let path = candidate.with_extension(extension);
                 if self.source_files.contains(&path) {
                     return Some(path);
                 }
             }
         }
 
-        if candidate.extension().is_none() {
+        if let Some(ext) = candidate_ext {
+            // A multi-dot basename ('./recipe.types' -> recipe.types.ts) wins
+            // over extension rewriting, so probe the appended form first.
+            if !extensions.contains(&ext) {
+                for extension in extensions {
+                    let path = candidate.with_extension(format!("{ext}.{extension}"));
+                    if self.source_files.contains(&path) {
+                        return Some(path);
+                    }
+                }
+            }
+
+            // Extension replacement only applies to JS-emitted specifiers that
+            // TS rewrites to their source counterparts; './theme.css' stays an
+            // unresolved asset rather than hitting theme.ts.
+            if extensions.contains(&"ts") {
+                for replacement in ts_counterparts(ext) {
+                    let path = candidate.with_extension(replacement);
+                    if self.source_files.contains(&path) {
+                        return Some(path);
+                    }
+                }
+            }
+        }
+
+        // Declaration-only modules: './types' backed by types.d.ts.
+        if extensions.contains(&"ts") {
+            let mut appended = candidate.clone().into_os_string();
+            appended.push(".d.ts");
+            let path = PathBuf::from(appended);
+            if self.source_files.contains(&path) {
+                return Some(path);
+            }
+        }
+
+        if candidate_ext.is_none() {
             for extension in extensions {
                 let path = candidate.join(format!("index.{extension}"));
+                if self.source_files.contains(&path) {
+                    return Some(path);
+                }
+            }
+            if extensions.contains(&"ts") {
+                let path = candidate.join("index.d.ts");
                 if self.source_files.contains(&path) {
                     return Some(path);
                 }
@@ -288,9 +322,26 @@ fn path_suffixes(path: &Path) -> Vec<PathBuf> {
     suffixes
 }
 
+/// TS source extensions a JS-emitted specifier extension may map back to,
+/// per TypeScript module resolution.
+fn ts_counterparts(ext: &str) -> &'static [&'static str] {
+    match ext {
+        "js" => &["ts", "tsx", "d.ts"],
+        "jsx" => &["tsx"],
+        "mjs" => &["mts", "d.mts"],
+        "cjs" => &["cts", "d.cts"],
+        _ => &[],
+    }
+}
+
 pub(crate) fn match_alias(pattern: &str, specifier: &str) -> Option<Vec<String>> {
     if let Some((prefix, suffix)) = pattern.split_once('*') {
-        if specifier.starts_with(prefix) && specifier.ends_with(suffix) {
+        // Prefix and suffix must not overlap in the specifier ("lib/*/lib"
+        // cannot match "lib/lib").
+        if specifier.len() >= prefix.len() + suffix.len()
+            && specifier.starts_with(prefix)
+            && specifier.ends_with(suffix)
+        {
             let middle = &specifier[prefix.len()..specifier.len() - suffix.len()];
             return Some(vec![middle.to_string()]);
         }
