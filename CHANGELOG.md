@@ -7,7 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- npm distribution: `blast-radius-cli` wrapper package (`npx blast-radius`)
+  with esbuild-style per-platform binary packages — no Rust toolchain needed.
+- Prebuilt binaries for Linux (x64/arm64 glibc, x64 musl), macOS (x64/arm64),
+  and Windows (x64) attached to GitHub Releases with a `sha256sums.txt`, built
+  with all language features; tag-driven release workflow.
+
 ### Fixed
+
+- Windows: report labels and package/directory grouping now normalize `\` path
+  separators to `/`, so files no longer collapse into a single `.` package.
 
 - Module resolution bugs: extension probe order (multi-dot specifiers like
   `./recipe.types` resolve correctly; asset imports such as `./theme.css` no

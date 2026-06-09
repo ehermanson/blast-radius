@@ -39,7 +39,21 @@ and supports Python, Rust, Ruby, Java, Vue, and Svelte as optional add-ons.
 
 ## Quick start
 
-Install the binary (requires a Rust toolchain with `cargo`):
+Install via npm — no Rust toolchain required. The package pulls in a prebuilt
+binary for your platform (Linux x64/arm64, macOS x64/arm64, Windows x64) with
+**all language features included**:
+
+```bash
+npm install --save-dev blast-radius-cli
+
+npx blast-radius --help
+```
+
+The same prebuilt binaries are attached to each
+[GitHub Release](https://github.com/ehermanson/blast-radius/releases) if you'd
+rather download one directly.
+
+Or build from source (requires a Rust toolchain with `cargo`):
 
 ```bash
 # From crates.io
@@ -163,7 +177,10 @@ chains (including `tsconfig.base.json`-style shared configs), package
 packages.
 
 Other languages are compiled in at **build time** with Cargo features (there is
-no runtime `--language` flag — a binary scans whatever was built into it):
+no runtime `--language` flag — a binary scans whatever was built into it). The
+**prebuilt binaries** (the `blast-radius-cli` npm package and GitHub Release
+downloads) ship with **all language features already compiled in**, so this
+only matters when building from source:
 
 ```bash
 cargo install --path .                              # JS/TS only (default)
