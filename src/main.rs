@@ -7,7 +7,9 @@ fn main() -> Result<ExitCode> {
     let app = cli::Cli::parse_args();
     let context = fs::RepoContext::discover(&app.repo_root)?;
     let result = analyze::run(&app, &context)?;
-    let output = report::render(&app.format, &result, app.verbose)?;
+    // Never write ANSI escapes into a file destination.
+    let color = app.output.is_none();
+    let output = report::render(&app.format, &result, app.verbose, color)?;
 
     if let Some(path) = &app.output {
         std_fs::write(path, output)?;

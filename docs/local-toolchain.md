@@ -41,12 +41,16 @@ Exit codes in blocking mode:
 - `1`: analysis error
 - `2`: a gate tripped — `--fail-threshold` exceeded, or the verdict reached
   `--fail-on-risk`
+- `64`: usage error (unknown flag, missing argument, etc.) — distinct from `2`
+  so CI can tell a misspelled flag apart from a tripped gate
 
 Two gates are available and can be combined; if either trips, the exit code is
 `2`:
 
-- `--fail-threshold <count>`: trips when more than `count` files are affected.
-  Best when you have a repo-specific budget in mind.
+- `--fail-threshold <count>`: trips when more than `count` downstream files are
+  impacted. The changed files themselves are not counted, so a file nothing
+  depends on passes `--fail-threshold 0`. Best when you have a repo-specific
+  budget in mind.
 - `--fail-on-risk <minor|moderate|risky|high>`: trips when the headline verdict
   is at or above the given tier. Prefer this in most cases — the tier already
   normalizes for reach and spread, so it travels across repos of different
