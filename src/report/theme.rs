@@ -20,8 +20,12 @@ pub(super) struct Theme {
 }
 
 impl Theme {
-    pub(super) fn detect() -> Self {
-        let color = std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
+    /// Color only when the caller allows it (e.g. not writing to `--output`),
+    /// stdout is a terminal, and `NO_COLOR` is unset.
+    pub(super) fn detect(allow_color: bool) -> Self {
+        let color = allow_color
+            && std::io::stdout().is_terminal()
+            && std::env::var_os("NO_COLOR").is_none();
         Self { color }
     }
 
