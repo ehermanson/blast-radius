@@ -59,6 +59,9 @@ pub enum ImportTarget {
     Name(String),
     Default,
     Namespace,
+    /// A specifier-less import (`import './setup'`, bare `require('./setup')`)
+    /// run only for its side effects: the importer depends on the whole file.
+    SideEffect,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

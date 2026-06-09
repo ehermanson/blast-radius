@@ -83,7 +83,9 @@ pub(super) fn build_result(
         }
     }
 
-    let total_affected_files = states.len();
+    // Roots sit at depth 0; the total counts only downstream files so it always
+    // equals direct + transitive and matches the rendered impact and risk gate.
+    let total_affected_files = states.values().filter(|state| state.depth >= 1).count();
     let directly_affected_files = states.values().filter(|state| state.depth == 1).count();
     let transitively_affected_files = states.values().filter(|state| state.depth > 1).count();
 

@@ -285,6 +285,94 @@ fn export_mode_follows_star_reexport_chains() {
 }
 
 #[test]
+fn file_mode_reports_consumers_of_star_only_barrels() {
+    let repo = tempdir().unwrap();
+    fs::create_dir_all(repo.path().join("src")).unwrap();
+    fs::write(
+        repo.path().join("src/widget.ts"),
+        "export const widget = () => null;\n",
+    )
+    .unwrap();
+    // The barrel has no statically-enumerable exports of its own.
+    fs::write(
+        repo.path().join("src/barrel.ts"),
+        "export * from './widget';\n",
+    )
+    .unwrap();
+    fs::write(
+        repo.path().join("src/consumer.ts"),
+        "import { widget } from './barrel';\nexport const render = () => widget();\n",
+    )
+    .unwrap();
+
+    // Changing the barrel itself must reach the consumer, not report "safe".
+    let json = run_json(repo.path(), &["file", "src/barrel.ts"]);
+    let labels = node_labels(&json);
+    assert!(labels.iter().any(|label| label == "src/consumer.ts"));
+    assert_eq!(json["summary"]["total_affected_files"].as_u64().unwrap(), 1);
+    assert_eq!(
+        json["summary"]["directly_affected_files"].as_u64().unwrap(),
+        1
+    );
+}
+
+#[test]
+fn export_mode_rejects_unknown_export_names() {
+    let repo = tempdir().unwrap();
+    fs::create_dir_all(repo.path().join("src")).unwrap();
+    fs::write(
+        repo.path().join("src/source.ts"),
+        "export const alpha = 1;\nexport const beta = 2;\n",
+    )
+    .unwrap();
+
+    AssertCommand::cargo_bin("blast-radius")
+        .unwrap()
+        .current_dir(repo.path())
+        .args([
+            "--repo-root",
+            repo.path().to_str().unwrap(),
+            "export",
+            "src/source.ts",
+            "NoSuchExport",
+        ])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("export 'NoSuchExport' not found"))
+        .stderr(predicate::str::contains("available exports: alpha, beta"));
+}
+
+#[test]
+fn export_mode_warns_instead_of_failing_when_exports_are_not_enumerable() {
+    let repo = tempdir().unwrap();
+    fs::create_dir_all(repo.path().join("src")).unwrap();
+    fs::write(
+        repo.path().join("src/widget.ts"),
+        "export const widget = () => null;\n",
+    )
+    .unwrap();
+    // Star re-exports mean the barrel's export set isn't statically known, so
+    // an unrecognized name proceeds with a warning rather than a hard error.
+    fs::write(
+        repo.path().join("src/barrel.ts"),
+        "export * from './widget';\n",
+    )
+    .unwrap();
+
+    let json = run_json(repo.path(), &["export", "src/barrel.ts", "NoSuchExport"]);
+    let warnings = json["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|warning| warning.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(warnings.contains("not a statically-known export"));
+    assert!(warnings.contains("src/barrel.ts"));
+}
+
+#[test]
 fn files_mode_deduplicates_overlapping_multi_root_impact() {
     let repo = tempdir().unwrap();
     fs::create_dir_all(repo.path().join("src")).unwrap();
@@ -303,7 +391,71 @@ fn files_mode_deduplicates_overlapping_multi_root_impact() {
     let labels = node_labels(&json);
     assert_eq!(label_count(&labels, "src/app.ts"), 1);
     assert_eq!(json["roots"].as_array().unwrap().len(), 2);
-    assert_eq!(json["summary"]["total_affected_files"].as_u64().unwrap(), 3);
+    // Downstream impact only: the changed files themselves are not counted.
+    assert_eq!(json["summary"]["total_affected_files"].as_u64().unwrap(), 1);
+}
+
+#[test]
+fn total_affected_files_excludes_the_changed_file() {
+    let repo = tempdir().unwrap();
+    fs::create_dir_all(repo.path().join("src")).unwrap();
+    fs::write(repo.path().join("src/source.ts"), "export const x = 1;\n").unwrap();
+    fs::write(
+        repo.path().join("src/app.ts"),
+        "import { x } from './source';\nexport const v = x + 1;\n",
+    )
+    .unwrap();
+
+    // One direct consumer: total equals direct + transitive, not roots + impact.
+    let json = run_json(repo.path(), &["file", "src/source.ts"]);
+    assert_eq!(json["summary"]["total_affected_files"].as_u64().unwrap(), 1);
+    assert_eq!(
+        json["summary"]["directly_affected_files"].as_u64().unwrap(),
+        1
+    );
+    assert_eq!(
+        json["summary"]["transitively_affected_files"]
+            .as_u64()
+            .unwrap(),
+        0
+    );
+
+    // A file nothing depends on has a zero blast radius, so --fail-threshold 0
+    // must pass.
+    AssertCommand::cargo_bin("blast-radius")
+        .unwrap()
+        .current_dir(repo.path())
+        .args([
+            "--repo-root",
+            repo.path().to_str().unwrap(),
+            "--fail-threshold",
+            "0",
+            "file",
+            "src/app.ts",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn files_mode_deduplicates_repeated_inputs() {
+    let repo = tempdir().unwrap();
+    fs::create_dir_all(repo.path().join("src")).unwrap();
+    fs::write(repo.path().join("src/source.ts"), "export const x = 1;\n").unwrap();
+    fs::write(
+        repo.path().join("src/app.ts"),
+        "import { x } from './source';\nexport const v = x + 1;\n",
+    )
+    .unwrap();
+
+    let json = run_json(
+        repo.path(),
+        &["files", "src/source.ts", "src/source.ts", "src/app.ts"],
+    );
+    let target_files = json["target"]["files"].as_array().unwrap();
+    assert_eq!(target_files.len(), 2);
+    assert_eq!(json["roots"].as_array().unwrap().len(), 2);
+    assert_eq!(json["summary"]["skipped_inputs"].as_u64().unwrap(), 0);
 }
 
 #[test]
@@ -336,7 +488,7 @@ fn files_mode_skips_unknown_inputs_and_analyzes_the_rest() {
     let labels = node_labels(&json);
     assert_eq!(label_count(&labels, "src/app.ts"), 1);
     assert_eq!(json["roots"].as_array().unwrap().len(), 2);
-    assert_eq!(json["summary"]["total_affected_files"].as_u64().unwrap(), 3);
+    assert_eq!(json["summary"]["total_affected_files"].as_u64().unwrap(), 1);
     assert_eq!(json["summary"]["skipped_inputs"].as_u64().unwrap(), 2);
 
     let warnings = json["warnings"]
@@ -772,7 +924,7 @@ fn vite_example_analyzes_real_world_repo() {
 
     let json: Value = serde_json::from_slice(&output).unwrap();
     assert_eq!(json["summary"]["parse_failures"].as_u64().unwrap(), 0);
-    assert_eq!(json["summary"]["total_affected_files"].as_u64().unwrap(), 2);
+    assert_eq!(json["summary"]["total_affected_files"].as_u64().unwrap(), 1);
     let labels: Vec<String> = json["nodes"]
         .as_array()
         .unwrap()
@@ -858,6 +1010,56 @@ fn python_export_mode_tracks_reexports() {
             .any(|label| label.contains("app/services/__init__.py#send_email"))
     );
     assert!(labels.iter().any(|label| label == "app/main.py"));
+}
+
+#[cfg(feature = "python")]
+#[test]
+fn python_submodule_import_reaches_the_submodule_file() {
+    let repo = python_fixture_root();
+
+    // `from app.utils import helpers` must bind to app/utils/helpers.py, not
+    // just app/utils/__init__.py.
+    let json = run_json(&repo, &["file", "app/utils/helpers.py"]);
+    assert_eq!(json["summary"]["parse_failures"].as_u64().unwrap(), 0);
+    assert_eq!(json["summary"]["unresolved_imports"].as_u64().unwrap(), 0);
+    let labels = node_labels(&json);
+    assert!(labels.iter().any(|label| label == "app/main.py"));
+}
+
+#[cfg(feature = "python")]
+#[test]
+fn python_symbol_import_from_package_init_still_resolves() {
+    let repo = python_fixture_root();
+
+    // `from app.services import send_email` is a plain symbol import and must
+    // keep binding to app/services/__init__.py.
+    let json = run_json(&repo, &["file", "app/services/__init__.py"]);
+    assert_eq!(json["summary"]["unresolved_imports"].as_u64().unwrap(), 0);
+    let labels = node_labels(&json);
+    assert!(labels.iter().any(|label| label == "app/main.py"));
+}
+
+#[cfg(feature = "python")]
+#[test]
+fn python_conditional_imports_create_edges() {
+    let repo = python_fixture_root();
+
+    // app/compat.py imports app.models only under `if TYPE_CHECKING:`.
+    let json = run_json(&repo, &["file", "app/models.py"]);
+    assert_eq!(json["summary"]["unresolved_imports"].as_u64().unwrap(), 0);
+    assert!(
+        node_labels(&json)
+            .iter()
+            .any(|label| label == "app/compat.py")
+    );
+
+    // ...and app.utils.formatting only inside `try/except ImportError`.
+    let json = run_json(&repo, &["file", "app/utils/formatting.py"]);
+    assert!(
+        node_labels(&json)
+            .iter()
+            .any(|label| label == "app/compat.py")
+    );
 }
 
 #[cfg(feature = "python")]
@@ -977,6 +1179,21 @@ fn rust_export_mode_tracks_reexports() {
             .iter()
             .any(|label| label.contains("src/lib.rs#send_email"))
     );
+}
+
+#[cfg(feature = "rust")]
+#[test]
+fn rust_workspace_cross_crate_import_resolves() {
+    let repo = rust_fixture_root();
+
+    // crates/api imports `demo_core::models::Account`; the edge must cross
+    // crate boundaries via the Cargo.toml package-name mapping.
+    let json = run_json(&repo, &["file", "crates/core/src/models.rs"]);
+    assert_eq!(json["summary"]["parse_failures"].as_u64().unwrap(), 0);
+    assert_eq!(json["summary"]["unresolved_imports"].as_u64().unwrap(), 0);
+    let labels = node_labels(&json);
+    assert!(labels.iter().any(|label| label == "crates/core/src/lib.rs"));
+    assert!(labels.iter().any(|label| label == "crates/api/src/main.rs"));
 }
 
 #[cfg(all(feature = "vue", feature = "svelte"))]
@@ -1167,6 +1384,42 @@ fn java_file_mode_reports_transitive_blast_radius() {
         labels
             .iter()
             .any(|label| label == "src/main/java/com/example/App.java")
+    );
+}
+
+#[cfg(feature = "java")]
+#[test]
+fn java_wildcard_import_fans_out_to_package_files() {
+    let repo = java_fixture_root();
+
+    // ReportService uses `import com.example.util.*;` and references both
+    // Formatter and Texts; changing either must reach it, not just the
+    // package's first file.
+    let json = run_json(
+        &repo,
+        &["file", "src/main/java/com/example/util/Texts.java"],
+    );
+    assert_eq!(json["summary"]["unresolved_imports"].as_u64().unwrap(), 0);
+    let labels = node_labels(&json);
+    assert!(
+        labels
+            .iter()
+            .any(|label| label == "src/main/java/com/example/report/ReportService.java")
+    );
+    assert!(
+        !labels
+            .iter()
+            .any(|label| label == "src/main/java/com/example/service/EmailService.java")
+    );
+
+    let json = run_json(
+        &repo,
+        &["file", "src/main/java/com/example/util/Formatter.java"],
+    );
+    assert!(
+        node_labels(&json)
+            .iter()
+            .any(|label| label == "src/main/java/com/example/report/ReportService.java")
     );
 }
 

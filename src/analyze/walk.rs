@@ -87,9 +87,15 @@ pub(super) fn build_reverse_links(
                             (ImportTarget::Namespace, ImportKind::CommonJs) => {
                                 EdgeKind::RequiresModule
                             }
+                            (ImportTarget::SideEffect, ImportKind::CommonJs) => {
+                                EdgeKind::RequiresModule
+                            }
                             (ImportTarget::Default, _) => EdgeKind::ImportsDefault,
                             (ImportTarget::Name(_), _) => EdgeKind::ImportsNamed,
                             (ImportTarget::Namespace, _) => EdgeKind::ImportsNamespace,
+                            // A side-effect import depends on the whole module,
+                            // like a namespace import.
+                            (ImportTarget::SideEffect, _) => EdgeKind::ImportsNamespace,
                         },
                     },
                 });
@@ -369,6 +375,11 @@ fn import_matches(
     module: &ModuleFacts,
     local: &str,
 ) -> bool {
+    // A side-effect import binds nothing, so there is no local usage to gate
+    // on: reaching the file is the impact.
+    if matches!(imported, ImportTarget::SideEffect) {
+        return true;
+    }
     import_target_matches(imported, current_exports, module, local)
         && (module.used_locals.contains(local)
             || module
@@ -389,12 +400,18 @@ fn import_target_matches(
     local: &str,
 ) -> bool {
     let _ = module;
+    // `*file*` marks a file-level root whose exports are not statically
+    // enumerable (e.g. a star-only barrel): the whole file changed, so any
+    // import that resolves to it is affected.
+    if current_exports.contains("*file*") {
+        return true;
+    }
     match imported {
+        // The importer depends on the whole file, whatever changed in it.
+        ImportTarget::SideEffect => true,
         ImportTarget::Name(name) => current_exports.contains(name),
         ImportTarget::Default => {
-            current_exports.contains("default")
-                || current_exports.contains("*file*")
-                || current_exports.contains(local)
+            current_exports.contains("default") || current_exports.contains(local)
         }
         ImportTarget::Namespace => module
             .namespace_member_usage
@@ -409,6 +426,9 @@ fn import_target_matches(
 }
 
 fn reexport_matches(imported: &ReexportTarget, current_exports: &BTreeSet<String>) -> bool {
+    if current_exports.contains("*file*") {
+        return true;
+    }
     match imported {
         ReexportTarget::Name(name) => current_exports.contains(name),
         ReexportTarget::Default => current_exports.contains("default"),
