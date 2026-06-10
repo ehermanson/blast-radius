@@ -69,7 +69,9 @@ jobs:
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
           - target: x86_64-apple-darwin
-            os: macos-13
+            # macos-13 (the old Intel label) was retired by GitHub in late
+            # 2025; macos-15-intel is the supported x64 runner.
+            os: macos-15-intel
           - target: aarch64-apple-darwin
             os: macos-latest
           - target: x86_64-pc-windows-msvc
