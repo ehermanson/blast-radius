@@ -174,10 +174,16 @@ jobs:
           if [ -s notes.md ]; then
             NOTES_ARGS=(--notes-file notes.md)
           fi
-          gh release create "$GITHUB_REF_NAME" \
-            --title "blast-radius v$VERSION" \
-            "${NOTES_ARGS[@]}" \
-            dist/*
+          # Idempotent: if the release already exists (e.g. workflow re-run
+          # after a partial failure), skip creation rather than erroring out.
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists — skipping creation."
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "blast-radius v$VERSION" \
+              "${NOTES_ARGS[@]}" \
+              dist/*
+          fi
 
   npm-publish:
     needs: [check, release]
@@ -233,10 +239,19 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           publish() {
+            local dir="${1%/}"  # strip any trailing slash
+            local name version
+            name=$(jq -r .name "${dir}/package.json")
+            version=$(jq -r .version "${dir}/package.json")
+            # Idempotent: skip if this exact version is already on the registry.
+            if npm view "${name}@${version}" version 2>/dev/null | grep -qx "${version}"; then
+              echo "• ${name}@${version}: already on registry, skipping"
+              return 0
+            fi
             # Provenance requires a public repo and OIDC; fall back without it
             # rather than blocking the release.
-            npm publish "$1" --provenance --access public \
-              || npm publish "$1" --access public
+            npm publish "${dir}" --provenance --access public \
+              || npm publish "${dir}" --access public
           }
           # Platform packages first so the wrapper's optionalDependencies all
           # resolve the moment it lands.
