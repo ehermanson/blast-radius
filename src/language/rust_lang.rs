@@ -118,7 +118,10 @@ fn rust_workspace_crate_root(ctx: &ResolveCtx, name: &str) -> Option<PathBuf> {
 
 /// Extract `[package] name` from a Cargo.toml manifest.
 fn cargo_package_name(manifest: &str) -> Option<String> {
-    let manifest: toml::Value = manifest.parse().ok()?;
+    // Parse as a `Table` (document), not `Value`: as of toml 1.x, `Value`'s
+    // `FromStr` accepts only a single inline value, and a manifest string
+    // would silently fail to parse — dropping every cross-crate edge.
+    let manifest: toml::Table = manifest.parse().ok()?;
     Some(manifest.get("package")?.get("name")?.as_str()?.to_string())
 }
 
