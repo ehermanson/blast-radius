@@ -1459,3 +1459,115 @@ fn java_suffix_ambiguity_is_reported_as_warning() {
                 .is_some_and(|warning| warning.contains("com/example/model/User.java"))
     }));
 }
+
+/// Regression: export-mode roots used to render "No downstream dependents
+/// found" in the verbose cascade while the summary reported impacted files —
+/// the root's out-edges hang off its `export:` node, which the renderer
+/// never looked at.
+#[test]
+fn verbose_cascade_renders_export_mode_chains() {
+    let repo = tempdir().unwrap();
+    fs::create_dir_all(repo.path().join("src")).unwrap();
+    fs::write(repo.path().join("package.json"), "{\"name\": \"repro\"}").unwrap();
+    fs::write(
+        repo.path().join("src/util.ts"),
+        "export function helper(): string { return \"x\"; }\n",
+    )
+    .unwrap();
+    fs::write(
+        repo.path().join("src/consumer.ts"),
+        "import { helper } from \"./util\";\nexport const value = helper();\n",
+    )
+    .unwrap();
+    fs::write(
+        repo.path().join("src/deep.ts"),
+        "import { value } from \"./consumer\";\nexport const final = value;\n",
+    )
+    .unwrap();
+
+    let output = AssertCommand::cargo_bin("blast-radius")
+        .unwrap()
+        .current_dir(repo.path())
+        .args([
+            "--repo-root",
+            repo.path().to_str().unwrap(),
+            "--verbose",
+            "export",
+            "src/util.ts",
+            "helper",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8(output).unwrap();
+
+    assert!(
+        !stdout.contains("No downstream dependents found"),
+        "{stdout}"
+    );
+    let paths_section = stdout.split("CASCADE · PATHS").nth(1).unwrap_or("");
+    assert!(paths_section.contains("consumer.ts"), "{stdout}");
+    assert!(paths_section.contains("deep.ts"), "{stdout}");
+}
+
+/// Regression: the cascade used to treat barrels as transparent and fan every
+/// barrel consumer out under every feeder file — claiming, e.g., that a file
+/// importing only `Toolbar` from the barrel depends directly on `Card.tsx`.
+/// Barrels now render as real nodes so every printed hop is a true edge.
+#[test]
+fn verbose_cascade_shows_barrels_without_false_direct_attribution() {
+    let repo = setup_repo();
+
+    let output = AssertCommand::cargo_bin("blast-radius")
+        .unwrap()
+        .current_dir(repo.path())
+        .args([
+            "--repo-root",
+            repo.path().to_str().unwrap(),
+            "--verbose",
+            "export",
+            "packages/ui/src/Button.tsx",
+            "Button",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8(output).unwrap();
+
+    // The barrel is a real direct dependent (named re-export of Button) and
+    // must appear in the overview, not be silently skipped.
+    let overview = stdout.split("CASCADE · PATHS").next().unwrap_or("");
+    assert!(
+        overview
+            .lines()
+            .any(|line| line.contains("direct") && line.contains("index.ts")),
+        "barrel missing from direct overview:\n{stdout}"
+    );
+
+    // In the paths tree, barrel consumers must hang under the barrel node,
+    // never directly under a feeder file they do not import.
+    let paths_section = stdout.split("CASCADE · PATHS").nth(1).unwrap_or("");
+    let indent_of = |line: &str| line.find(['├', '└']).unwrap_or(usize::MAX);
+    let lines: Vec<&str> = paths_section.lines().collect();
+    for (index, line) in lines.iter().enumerate() {
+        if !line.contains("LegacyButtonCard.jsx") {
+            continue;
+        }
+        let has_barrel_ancestor = lines[..index]
+            .iter()
+            .rev()
+            .take_while(|previous| indent_of(previous) != usize::MAX)
+            .any(|previous| previous.contains("index.ts") && indent_of(previous) < indent_of(line));
+        assert!(
+            has_barrel_ancestor,
+            "LegacyButtonCard attributed to a non-barrel parent:\n{stdout}"
+        );
+    }
+
+    // Repeated subtrees collapse to a back-reference instead of re-printing.
+    assert!(paths_section.contains("(paths shown above)"), "{stdout}");
+}

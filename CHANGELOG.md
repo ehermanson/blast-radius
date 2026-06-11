@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Verbose cascade tree (`--verbose`): export-mode roots no longer print
+  "No downstream dependents found" while the summary reports impacted files;
+  chains that pass through named re-exports or CommonJS re-exports no longer
+  dead-end; and barrels render as real nodes instead of being skipped — barrel
+  consumers were previously attributed to every feeder file, fabricating
+  dependency paths that do not exist. Subtrees reachable along several paths
+  are printed once and back-referenced with "(paths shown above)".
+- Mermaid/DOT output: distinct files whose names differ only in punctuation
+  (e.g. `util-x.ts` vs `util.x.ts`) no longer merge into a single graph node;
+  sanitized node ids carry a stable fingerprint of the original id.
+- Workspace cross-crate Rust resolution survives the `toml` 1.x upgrade:
+  manifests are parsed as TOML documents (`toml::Table`), where `toml::Value`
+  parsing now silently fails.
+
 ## [0.2.0] - 2026-06-09
 
 ### Added

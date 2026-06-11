@@ -1,5 +1,4 @@
 use std::collections::BTreeSet;
-use std::path::Path;
 
 use crate::graph::{AnalysisMode, AnalysisResult, AnalysisTarget, EdgeKind, GraphNode, NodeKind};
 
@@ -62,16 +61,17 @@ pub(super) fn render_cascade(result: &AnalysisResult, theme: &Theme, lines: &mut
                 theme.muted("No transitive paths beyond the direct dependents")
             ));
         } else {
+            let mut walk = BranchWalk::default();
             for (index, child_id) in cascading_children.iter().enumerate() {
                 let is_last_branch = index + 1 == cascading_children.len();
-                let mut path = BTreeSet::new();
-                path.insert(root_id.clone());
+                walk.path.clear();
+                walk.path.insert(root_id.clone());
                 render_path_branch(
                     child_id,
                     result,
                     "",
                     is_last_branch,
-                    &mut path,
+                    &mut walk,
                     lines,
                     theme,
                 );
@@ -143,27 +143,28 @@ fn child_edges<'a>(node_id: &str, result: &'a AnalysisResult) -> Vec<&'a crate::
 }
 
 fn visible_child_edges(node_id: &str, result: &AnalysisResult) -> Vec<VisibleEdge> {
-    let Some(root_node) = find_node(result, node_id) else {
+    if find_node(result, node_id).is_none() {
         return Vec::new();
-    };
+    }
 
     let mut visible = Vec::new();
     let mut seen = BTreeSet::new();
-    let mut stack = child_edges(node_id, result)
-        .into_iter()
-        .map(|edge| (edge.to.clone(), vec![edge.kind], edge.is_ambiguous))
-        .collect::<Vec<_>>();
+    let mut stack = outgoing_seeds(node_id, result);
 
     while let Some((current_id, kinds, ambiguous)) = stack.pop() {
         let Some(node) = find_node(result, &current_id) else {
             continue;
         };
 
-        if is_transparent_node(node, root_node, result) {
-            for edge in child_edges(&current_id, result) {
-                let mut next_kinds = kinds.clone();
-                next_kinds.push(edge.kind);
-                stack.push((edge.to.clone(), next_kinds, ambiguous || edge.is_ambiguous));
+        // Export-level nodes are annotations, not stops: a consumer's own
+        // out-edges hang off its file node, so re-anchor there. Without this,
+        // chains that arrive at `export:consumer#name` (named re-exports,
+        // CommonJS re-exports) dead-end and the consumer's downstream paths
+        // silently vanish from the cascade.
+        if node.kind == NodeKind::Export {
+            let owner_id = rebuilt_file_id(&node.file);
+            if owner_id != node_id && owner_id != current_id {
+                stack.push((owner_id, kinds, ambiguous));
             }
             continue;
         }
@@ -186,6 +187,33 @@ fn visible_child_edges(node_id: &str, result: &AnalysisResult) -> Vec<VisibleEdg
     visible
 }
 
+/// The out-edges to walk when expanding a node. Edges are emitted at mixed
+/// granularity — most hops have `file:` parents, but single-export roots emit
+/// from the `export:` node — so a file node's true child set is the union of
+/// its own out-edges and those of its export-level nodes.
+fn outgoing_seeds(node_id: &str, result: &AnalysisResult) -> Vec<(String, Vec<EdgeKind>, bool)> {
+    let mut ids = vec![node_id.to_string()];
+    if let Some(node) = find_node(result, node_id).filter(|node| node.kind == NodeKind::File) {
+        ids.extend(
+            result
+                .nodes
+                .iter()
+                .filter(|other| other.kind == NodeKind::Export && other.file == node.file)
+                .map(|other| other.id.clone()),
+        );
+    }
+
+    let mut seeds = Vec::new();
+    for id in &ids {
+        seeds.extend(
+            child_edges(id, result)
+                .into_iter()
+                .map(|edge| (edge.to.clone(), vec![edge.kind], edge.is_ambiguous)),
+        );
+    }
+    seeds
+}
+
 fn final_visible_kind(kinds: &[EdgeKind]) -> EdgeKind {
     kinds
         .iter()
@@ -195,47 +223,13 @@ fn final_visible_kind(kinds: &[EdgeKind]) -> EdgeKind {
         .unwrap_or_else(|| kinds.last().copied().unwrap_or(EdgeKind::ReexportsNamed))
 }
 
-fn is_transparent_node(node: &GraphNode, root_node: &GraphNode, result: &AnalysisResult) -> bool {
-    if node.id == root_node.id {
-        return false;
-    }
-
-    match node.kind {
-        NodeKind::Export => true,
-        NodeKind::File => is_barrel_passthrough(node, result),
-    }
-}
-
-fn is_barrel_passthrough(node: &GraphNode, result: &AnalysisResult) -> bool {
-    if file_stem(&node.file) != Some("index") {
-        return false;
-    }
-
-    let mut incoming = result
-        .edges
-        .iter()
-        .filter(|edge| edge.to == node.id)
-        .peekable();
-    let mut outgoing = result
-        .edges
-        .iter()
-        .filter(|edge| edge.from == node.id)
-        .peekable();
-
-    if incoming.peek().is_none() || outgoing.peek().is_none() {
-        return false;
-    }
-
-    incoming.all(|edge| {
-        matches!(
-            edge.kind,
-            EdgeKind::ReexportsNamed | EdgeKind::ReexportsStar
-        )
-    })
-}
-
-fn file_stem(path: &Path) -> Option<&str> {
-    path.file_stem().and_then(|stem| stem.to_str())
+/// Traversal state shared across path branches: `path` guards against cycles
+/// on the current root-to-leaf walk; `expanded` remembers nodes whose subtree
+/// has already been printed anywhere in the tree.
+#[derive(Default)]
+struct BranchWalk {
+    path: BTreeSet<String>,
+    expanded: BTreeSet<String>,
 }
 
 fn render_path_branch(
@@ -243,7 +237,7 @@ fn render_path_branch(
     result: &AnalysisResult,
     prefix: &str,
     is_last: bool,
-    path: &mut BTreeSet<String>,
+    walk: &mut BranchWalk,
     lines: &mut Vec<String>,
     theme: &Theme,
 ) {
@@ -253,16 +247,33 @@ fn render_path_branch(
 
     let branch = if is_last { "└── " } else { "├── " };
 
+    // A node reachable along several paths gets its subtree printed once;
+    // later occurrences collapse to a back-reference instead of repeating it.
+    let already_expanded = walk.expanded.contains(node_id);
+    let has_children = !visible_child_edges(node_id, result).is_empty();
+
+    let suffix = if already_expanded && has_children {
+        format!("  {}", theme.muted("(paths shown above)"))
+    } else {
+        String::new()
+    };
+
     let edge_summary = edge_summary(node_id, result, theme);
     lines.push(format!(
-        "{}{}{}{}",
+        "{}{}{}{}{}",
         prefix,
         theme.muted(branch),
         format_node(node, theme),
-        edge_summary
+        edge_summary,
+        suffix
     ));
 
-    if !path.insert(node_id.to_string()) {
+    if already_expanded {
+        return;
+    }
+    walk.expanded.insert(node_id.to_string());
+
+    if !walk.path.insert(node_id.to_string()) {
         return;
     }
 
@@ -275,7 +286,7 @@ fn render_path_branch(
     let child_edges = visible_child_edges(node_id, result);
     for (index, edge) in child_edges.iter().enumerate() {
         let is_last_child = index + 1 == child_edges.len();
-        if path.contains(&edge.to) {
+        if walk.path.contains(&edge.to) {
             continue;
         }
         render_path_branch(
@@ -283,13 +294,13 @@ fn render_path_branch(
             result,
             &next_prefix,
             is_last_child,
-            path,
+            walk,
             lines,
             theme,
         );
     }
 
-    path.remove(node_id);
+    walk.path.remove(node_id);
 }
 
 fn edge_summary(node_id: &str, result: &AnalysisResult, theme: &Theme) -> String {
