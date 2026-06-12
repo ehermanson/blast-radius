@@ -36,16 +36,6 @@ mod rust_lang;
 #[cfg(feature = "rust")]
 use rust_lang::RustAdapter;
 
-#[cfg(feature = "ruby")]
-mod ruby;
-#[cfg(feature = "ruby")]
-use ruby::RubyAdapter;
-
-#[cfg(feature = "java")]
-mod java;
-#[cfg(feature = "java")]
-use java::JavaAdapter;
-
 /// A language's parsing and resolution behavior. Stateless: resolution reads
 /// shared indexes from the [`ResolveCtx`] passed in.
 pub(crate) trait LanguageAdapter: Send + Sync {
@@ -83,10 +73,6 @@ fn registry() -> &'static [Box<dyn LanguageAdapter>] {
         adapters.push(Box::new(VueAdapter));
         #[cfg(feature = "svelte")]
         adapters.push(Box::new(SvelteAdapter));
-        #[cfg(feature = "ruby")]
-        adapters.push(Box::new(RubyAdapter));
-        #[cfg(feature = "java")]
-        adapters.push(Box::new(JavaAdapter));
         adapters
     })
 }

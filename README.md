@@ -34,8 +34,9 @@ Use it to:
 - **Catch surprises in code review** — surface the files a diff touches that aren't in the diff.
 - **Gate risky commits in CI or pre-commit hooks** — fail the build when a change reaches too far.
 
-It works out of the box for JavaScript and TypeScript repos (including monorepos),
-and supports Python, Rust, Ruby, Java, Vue, and Svelte as optional add-ons.
+It is built first and foremost for JavaScript and TypeScript repos (including
+monorepos), with first-class Vue and Svelte support and beta Python and Rust
+adapters.
 
 ## Quick start
 
@@ -184,19 +185,22 @@ only matters when building from source:
 
 ```bash
 cargo install --path .                              # JS/TS only (default)
-cargo install --path . --features python            # + Python
-cargo install --path . --features rust              # + Rust
-cargo install --path . --features ruby              # + Ruby
-cargo install --path . --features java              # + Java
 cargo install --path . --features vue,svelte        # + Vue + Svelte
-cargo install --path . --features python,rust,vue,svelte,ruby,java   # everything
+cargo install --path . --features python            # + Python (beta)
+cargo install --path . --features rust              # + Rust (beta)
+cargo install --path . --features python,rust,vue,svelte   # everything
 ```
 
-Note: the Ruby adapter follows explicit `require`/`require_relative` only —
-Rails/Zeitwerk autoloading is not modeled, so autoloaded apps produce
-near-empty graphs (see `docs/language-support.md`).
+**Vue and Svelte** ride the same battle-tested JS/TS pipeline (script blocks
+are extracted and parsed as TypeScript/JavaScript). The **Python and Rust**
+adapters use real parsers and work well on conventionally structured repos,
+but are labeled beta: see `docs/language-support.md` for their known blind
+spots before trusting them on an unconventional layout.
 
-See `docs/language-support.md` for the multi-language architecture.
+Ruby and Java adapters were removed in 0.3.0 — their heuristic parsers were
+not accurate enough on real codebases to trust, and a wrong "looks safe"
+answer is worse than no answer (`docs/language-support.md` has the details;
+0.2.1 is the last release that included them).
 
 ## Configuration
 
@@ -231,8 +235,6 @@ The `examples/` directory has runnable fixtures for each supported language:
 | `python-demo` / `fastapi` † | Python package, relative, and `__init__.py` reexport imports |
 | `rust-demo`                 | `mod`, `pub use`, `crate::` / `self::` imports               |
 | `component-demo`            | Mixed Vue/Svelte component imports                           |
-| `ruby-demo`                 | `require_relative`, classes, modules, methods                |
-| `java-demo`                 | Packages, imports, public classes                            |
 
 † `chakra-ui` and `fastapi` are large real-world snapshots that aren't committed
 to the repo. Fetch them on demand (pinned to a known upstream commit) before

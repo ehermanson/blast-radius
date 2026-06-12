@@ -29,7 +29,7 @@ npx blast-radius src/some/file.ts
 ## Notes
 
 - The prebuilt binaries ship with **all language features compiled in**
-  (Python, Rust, Vue, Svelte, Ruby, Java) — unlike a default
+  (Python, Rust, Vue, Svelte) — unlike a default
   `cargo install blast-radius`, which only includes the default feature set.
 - Supported platforms: Linux x64/arm64 (glibc), Linux x64 (musl), macOS
   x64/arm64, Windows x64. On other platforms, build from source with

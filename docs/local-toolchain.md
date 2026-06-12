@@ -15,7 +15,7 @@ With optional language support:
 
 ```bash
 cargo install --path . --features vue,svelte
-cargo install --path . --features python,rust,vue,svelte,ruby,java
+cargo install --path . --features python,rust,vue,svelte
 ```
 
 Confirm it is on your `PATH`:

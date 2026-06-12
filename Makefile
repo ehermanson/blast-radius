@@ -1,6 +1,6 @@
 SHELL := /bin/zsh
 
-.PHONY: test test-python test-rust test-components test-ruby test-java test-all-languages coverage coverage-gate perf quality quality-python quality-rust quality-components quality-ruby quality-java stress-chakra stress-python-demo stress-fastapi stress-rust-demo stress-components stress-ruby-demo stress-java-demo smoke-mui build metrics fetch-examples lint fmt fmt-check
+.PHONY: test test-python test-rust test-components test-all-languages coverage coverage-gate perf quality quality-python quality-rust quality-components stress-chakra stress-python-demo stress-fastapi stress-rust-demo stress-components smoke-mui build metrics fetch-examples lint fmt fmt-check
 
 build:
 	cargo build
@@ -30,14 +30,8 @@ test-rust:
 test-components:
 	cargo test --features vue,svelte
 
-test-ruby:
-	cargo test --features ruby
-
-test-java:
-	cargo test --features java
-
 test-all-languages:
-	cargo test --features python,rust,vue,svelte,ruby,java
+	cargo test --features python,rust,vue,svelte
 
 coverage:
 	cargo llvm-cov --summary-only
@@ -59,12 +53,6 @@ stress-rust-demo:
 
 stress-components:
 	cargo run --features vue,svelte --bin blast-radius -- --repo-root examples/component-demo file src/shared.ts
-
-stress-ruby-demo:
-	cargo run --features ruby --bin blast-radius -- --repo-root examples/ruby-demo file lib/app/utils/formatter.rb
-
-stress-java-demo:
-	cargo run --features java --bin blast-radius -- --repo-root examples/java-demo file src/main/java/com/example/util/Formatter.java
 
 smoke-mui: build
 	@if [ ! -d target/tmp/mui-mini/.git ] && [ ! -d target/tmp/mui-mini/docs ]; then \
@@ -89,7 +77,3 @@ quality-python: test-python stress-python-demo stress-fastapi
 quality-rust: test-rust stress-rust-demo
 
 quality-components: test-components stress-components
-
-quality-ruby: test-ruby stress-ruby-demo
-
-quality-java: test-java stress-java-demo

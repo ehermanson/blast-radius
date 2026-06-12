@@ -6,7 +6,7 @@ on:
       - "v*"
 
 env:
-  FAT_FEATURES: python,rust,vue,svelte,ruby,java
+  FAT_FEATURES: python,rust,vue,svelte
 
 permissions:
   contents: read

@@ -10,8 +10,6 @@ make test
 make test-python
 make test-rust
 make test-components
-make test-ruby
-make test-java
 make test-all-languages
 make coverage
 make coverage-gate
@@ -20,8 +18,6 @@ make stress-python-demo
 make stress-fastapi
 make stress-rust-demo
 make stress-components
-make stress-ruby-demo
-make stress-java-demo
 make smoke-mui
 make perf
 make metrics
@@ -29,8 +25,6 @@ make quality
 make quality-python
 make quality-rust
 make quality-components
-make quality-ruby
-make quality-java
 ```
 
 ## What They Mean
@@ -43,10 +37,6 @@ make quality-java
   Runs tests with Rust support compiled in via `--features rust`.
 - `make test-components`
   Runs tests with Vue and Svelte support compiled in via `--features vue,svelte`.
-- `make test-ruby`
-  Runs tests with Ruby support compiled in via `--features ruby`.
-- `make test-java`
-  Runs tests with Java support compiled in via `--features java`.
 - `make test-all-languages`
   Runs tests with every optional language adapter compiled in.
 - `make coverage`
@@ -64,10 +54,6 @@ make quality-java
   Runs the small Rust fixture through the Rust feature build.
 - `make stress-components`
   Runs the mixed Vue/Svelte fixture through the component feature build.
-- `make stress-ruby-demo`
-  Runs the small Ruby fixture through the Ruby feature build.
-- `make stress-java-demo`
-  Runs the small Java fixture through the Java feature build.
 - `make smoke-mui`
   Clones Material UI into `target/tmp/mui-mini` if needed and runs a real-world
   smoke test. This currently succeeds with one skipped template parse failure
@@ -87,10 +73,6 @@ make quality-java
   Runs Rust feature tests plus the Rust fixture stress case.
 - `make quality-components`
   Runs Vue/Svelte feature tests plus the component fixture stress case.
-- `make quality-ruby`
-  Runs Ruby feature tests plus the Ruby fixture stress case.
-- `make quality-java`
-  Runs Java feature tests plus the Java fixture stress case.
 
 ## Accuracy Metrics To Watch
 

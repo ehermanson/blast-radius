@@ -67,7 +67,6 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
     let mut resolution_cache = ResolutionCache::new(&resolver);
     let (modules, mut warnings, parse_failures) = load_modules(context);
     warnings.splice(0..0, context.warnings.iter().cloned());
-    warnings.extend(resolver.warnings());
     let module_states = build_module_states(&modules);
     let reverse = build_reverse_links(&modules, &module_states, &mut resolution_cache);
     let unresolved = unresolved_import_diagnostics(

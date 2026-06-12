@@ -13,16 +13,6 @@ mod component;
 #[cfg(any(feature = "vue", feature = "svelte"))]
 pub(crate) use component::parse_component_module;
 
-#[cfg(feature = "java")]
-mod java;
-#[cfg(feature = "java")]
-pub(crate) use java::parse_java_module;
-
-#[cfg(feature = "ruby")]
-mod ruby;
-#[cfg(feature = "ruby")]
-pub(crate) use ruby::parse_ruby_module;
-
 #[cfg(feature = "python")]
 mod python;
 #[cfg(feature = "python")]
@@ -266,77 +256,6 @@ const label = formatLabel('save')
                 .exports
                 .iter()
                 .any(|export| export.exported == "default")
-        );
-    }
-
-    #[cfg(feature = "ruby")]
-    #[test]
-    fn parses_ruby_requires_and_exports() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("email_service.rb");
-        fs::write(
-            &path,
-            r#"
-require_relative "../models/user"
-
-class EmailService
-  def self.send_email(email)
-  end
-end
-"#,
-        )
-        .unwrap();
-
-        let facts = parse_module(&path).unwrap();
-        assert!(
-            facts
-                .imports
-                .iter()
-                .any(|import| import.source == "../models/user")
-        );
-        assert!(
-            facts
-                .exports
-                .iter()
-                .any(|export| export.exported == "EmailService")
-        );
-        assert!(
-            facts
-                .exports
-                .iter()
-                .any(|export| export.exported == "send_email")
-        );
-    }
-
-    #[cfg(feature = "java")]
-    #[test]
-    fn parses_java_imports_and_exports() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("EmailService.java");
-        fs::write(
-            &path,
-            r#"
-package com.example.service;
-
-import com.example.model.User;
-
-public class EmailService {}
-"#,
-        )
-        .unwrap();
-
-        let facts = parse_module(&path).unwrap();
-        assert!(
-            facts
-                .imports
-                .iter()
-                .any(|import| import.source == "com.example.model.User" && import.local == "User")
-        );
-        assert!(
-            facts
-                .exports
-                .iter()
-                .any(|export| export.exported == "EmailService")
         );
     }
 }

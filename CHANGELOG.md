@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-12
+
+### Removed
+
+- **Ruby and Java language support.** Both adapters were line-based heuristic
+  parsers that could not be trusted on real codebases: the Ruby adapter only
+  followed explicit `require`/`require_relative`, so Rails/Zeitwerk-autoloaded
+  apps produced near-empty graphs that read as "this change is safe"; the Java
+  adapter had no Maven/Gradle multi-module awareness and resolved wildcard
+  imports by capitalization heuristics. For an impact-analysis tool, a
+  confidently wrong answer is worse than none. They may return as real-parser
+  adapters once they can meet the accuracy bar; 0.2.1 is the last release that
+  includes them.
+
+### Changed
+
+- Repositioned language support: JavaScript/TypeScript (with Vue/Svelte) is
+  the primary target; the Python and Rust adapters are documented as beta with
+  their known blind spots listed in `docs/language-support.md`.
+
 ## [0.2.1] - 2026-06-12
 
 ### Fixed

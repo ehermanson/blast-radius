@@ -15,18 +15,11 @@ pub(crate) use package::{
 mod tests;
 
 /// Shared resolution state and primitives, borrowed by language adapters. Holds
-/// the source-file index, workspace packages, tsconfig aliases, and the
-/// language-specific suffix/package indexes used by Ruby and Java.
+/// the source-file index, workspace packages, and tsconfig aliases.
 #[derive(Debug, Clone)]
 pub struct ResolveCtx {
     pub(crate) repo_root: PathBuf,
     pub(crate) source_files: HashSet<PathBuf>,
-    #[cfg(any(feature = "ruby", feature = "java"))]
-    pub(crate) suffix_index: BTreeMap<PathBuf, PathBuf>,
-    #[cfg(any(feature = "ruby", feature = "java"))]
-    suffix_ambiguities: Vec<SuffixAmbiguity>,
-    #[cfg(feature = "java")]
-    pub(crate) java_package_index: BTreeMap<PathBuf, Vec<PathBuf>>,
     pub(crate) packages: Vec<PackageInfo>,
     pub(crate) package_by_name: BTreeMap<String, usize>,
     pub(crate) tsconfigs: Vec<TsConfigPath>,
@@ -36,20 +29,6 @@ pub struct ResolveCtx {
 pub enum Resolution {
     Resolved(PathBuf),
     Unresolved,
-}
-
-#[cfg(any(feature = "ruby", feature = "java"))]
-#[derive(Debug, Clone)]
-struct SuffixAmbiguity {
-    suffix: PathBuf,
-    paths: Vec<PathBuf>,
-}
-
-#[cfg(any(feature = "ruby", feature = "java"))]
-#[derive(Debug, Clone)]
-struct SuffixIndex {
-    index: BTreeMap<PathBuf, PathBuf>,
-    ambiguities: Vec<SuffixAmbiguity>,
 }
 
 impl ResolveCtx {
@@ -64,18 +43,9 @@ impl ResolveCtx {
         for (index, package) in packages.iter().enumerate() {
             package_by_name.entry(package.name.clone()).or_insert(index);
         }
-        #[cfg(any(feature = "ruby", feature = "java"))]
-        let suffix_index = build_suffix_index(&context.repo_root, &context.source_files);
-
         Ok(Self {
             repo_root: context.repo_root.clone(),
             source_files: context.source_files.iter().cloned().collect(),
-            #[cfg(any(feature = "ruby", feature = "java"))]
-            suffix_index: suffix_index.index,
-            #[cfg(any(feature = "ruby", feature = "java"))]
-            suffix_ambiguities: suffix_index.ambiguities,
-            #[cfg(feature = "java")]
-            java_package_index: build_java_package_index(&context.repo_root, &context.source_files),
             packages,
             package_by_name,
             tsconfigs: context.tsconfigs.clone(),
@@ -214,32 +184,6 @@ impl Resolver {
         })
     }
 
-    pub fn warnings(&self) -> Vec<String> {
-        #[cfg(any(feature = "ruby", feature = "java"))]
-        {
-            let mut warnings = Vec::new();
-            for ambiguity in &self.ctx.suffix_ambiguities {
-                let paths = ambiguity
-                    .paths
-                    .iter()
-                    .map(|path| path.strip_prefix(&self.ctx.repo_root).unwrap_or(path))
-                    .map(|path| path.display().to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                warnings.push(format!(
-                    "ambiguous suffix resolution for {} matched multiple files: {paths}",
-                    ambiguity.suffix.display()
-                ));
-            }
-            warnings
-        }
-
-        #[cfg(not(any(feature = "ruby", feature = "java")))]
-        {
-            Vec::new()
-        }
-    }
-
     pub fn resolve(&self, importer: &Path, specifier: &str) -> Resolution {
         let importer = self.ctx.normalize_importer(importer);
         crate::language::adapter_for(&importer).resolve(&self.ctx, &importer, specifier)
@@ -249,77 +193,6 @@ impl Resolver {
         let importer = self.ctx.normalize_importer(importer);
         crate::language::adapter_for(&importer).is_internal(&self.ctx, &importer, specifier)
     }
-}
-
-#[cfg(any(feature = "ruby", feature = "java"))]
-fn build_suffix_index(repo_root: &Path, source_files: &[PathBuf]) -> SuffixIndex {
-    let mut all_matches: BTreeMap<PathBuf, Vec<PathBuf>> = BTreeMap::new();
-
-    for file in source_files {
-        let Some(ext) = file.extension().and_then(|ext| ext.to_str()) else {
-            continue;
-        };
-        if !matches!(ext, "rb" | "java") {
-            continue;
-        }
-
-        let relative = file.strip_prefix(repo_root).unwrap_or(file);
-        for suffix in path_suffixes(relative) {
-            all_matches.entry(suffix).or_default().push(file.clone());
-        }
-    }
-
-    let mut index = BTreeMap::new();
-    let mut ambiguities = Vec::new();
-    for (suffix, paths) in all_matches {
-        if let Some(first) = paths.first() {
-            index.insert(suffix.clone(), first.clone());
-        }
-        if paths.len() > 1 {
-            ambiguities.push(SuffixAmbiguity { suffix, paths });
-        }
-    }
-
-    SuffixIndex { index, ambiguities }
-}
-
-#[cfg(feature = "java")]
-fn build_java_package_index(
-    repo_root: &Path,
-    source_files: &[PathBuf],
-) -> BTreeMap<PathBuf, Vec<PathBuf>> {
-    let mut index: BTreeMap<PathBuf, Vec<PathBuf>> = BTreeMap::new();
-
-    for file in source_files {
-        if file.extension().and_then(|ext| ext.to_str()) != Some("java") {
-            continue;
-        }
-        let Some(parent) = file.strip_prefix(repo_root).unwrap_or(file).parent() else {
-            continue;
-        };
-
-        for suffix in path_suffixes(parent) {
-            index.entry(suffix).or_default().push(file.clone());
-        }
-    }
-
-    index
-}
-
-#[cfg(any(feature = "ruby", feature = "java"))]
-fn path_suffixes(path: &Path) -> Vec<PathBuf> {
-    let components: Vec<_> = path.iter().collect();
-    let mut suffixes = Vec::new();
-
-    for start in 0..components.len() {
-        let mut suffix = PathBuf::new();
-        for component in &components[start..] {
-            suffix.push(Path::new(*component));
-        }
-        suffixes.push(suffix);
-    }
-
-    suffixes
 }
 
 /// TS source extensions a JS-emitted specifier extension may map back to,

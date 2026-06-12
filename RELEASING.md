@@ -45,7 +45,7 @@ publishes the npm packages. Publishing to crates.io stays manual (see below).
 
 4. **Watch CI** (`gh run watch`). The workflow does, in order:
    - `check` — verifies the tag matches `Cargo.toml`, runs `cargo test` with
-     the fat feature set (`python,rust,vue,svelte,ruby,java`) as a smoke gate.
+     the fat feature set (`python,rust,vue,svelte`) as a smoke gate.
    - `build` — matrix over six targets (Linux glibc x64/arm64, Linux musl x64,
      macOS x64/arm64, Windows x64), `cargo build --release --locked` with fat
      features, strips the binary, and archives it as
