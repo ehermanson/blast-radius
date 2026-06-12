@@ -85,6 +85,8 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
     };
 
     match &cli.command {
+        // Handled in main before analysis ever runs.
+        Command::Completions { .. } => bail!("completions does not run analysis"),
         Command::Export { file, export_name } => {
             let file = normalize_input_path(&context.repo_root, file)?;
             if !modules.contains_key(&file) {

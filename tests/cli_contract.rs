@@ -185,3 +185,137 @@ fn global_flags_work_after_the_subcommand() {
     let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
     assert_eq!(json["summary"]["total_affected_files"].as_u64().unwrap(), 2);
 }
+
+#[test]
+fn files_dash_reads_path_list_from_stdin() {
+    let repo = setup_repo();
+    let output = blast_radius(repo.path())
+        .args(["--format", "json", "files", "-"])
+        .write_stdin("src/source.ts\n\n  src/a.ts  \n")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    let roots = json["roots"].as_array().unwrap();
+    assert_eq!(roots.len(), 2, "blank lines and padding must be ignored");
+}
+
+#[test]
+fn files_dash_mixes_with_explicit_paths() {
+    let repo = setup_repo();
+    let output = blast_radius(repo.path())
+        .args(["--format", "json", "files", "src/a.ts", "-"])
+        .write_stdin("src/source.ts\n")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(json["roots"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn files_dash_with_empty_stdin_is_an_analysis_error() {
+    let repo = setup_repo();
+    blast_radius(repo.path())
+        .args(["files", "-"])
+        .write_stdin("")
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("stdin file list was empty"));
+}
+
+#[test]
+fn quiet_suppresses_stdout_but_keeps_exit_codes_and_output_file() {
+    let repo = setup_repo();
+    blast_radius(repo.path())
+        .args(["--quiet", "file", "src/source.ts"])
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty());
+
+    blast_radius(repo.path())
+        .args(["--quiet", "--fail-threshold", "1", "file", "src/source.ts"])
+        .assert()
+        .failure()
+        .code(2)
+        .stdout(predicate::str::is_empty());
+
+    let out_path = repo.path().join("report.txt");
+    blast_radius(repo.path())
+        .args([
+            "--quiet",
+            "--output",
+            out_path.to_str().unwrap(),
+            "file",
+            "src/source.ts",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty());
+    assert!(fs::read_to_string(&out_path).unwrap().contains("IMPACTED"));
+}
+
+#[test]
+fn color_always_emits_ansi_even_when_piped_and_never_strips_it() {
+    let repo = setup_repo();
+    // Test harness stdout is a pipe, so auto (default) must already be plain.
+    blast_radius(repo.path())
+        .args(["file", "src/source.ts"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains('\u{1b}').not());
+
+    blast_radius(repo.path())
+        .args(["--color", "always", "file", "src/source.ts"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains('\u{1b}'));
+
+    blast_radius(repo.path())
+        .args(["--color", "never", "file", "src/source.ts"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains('\u{1b}').not());
+}
+
+#[test]
+fn completions_subcommand_prints_script() {
+    AssertCommand::cargo_bin("blast-radius")
+        .unwrap()
+        .args(["completions", "zsh"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("blast-radius"));
+}
+
+#[test]
+fn long_version_lists_compiled_languages() {
+    AssertCommand::cargo_bin("blast-radius")
+        .unwrap()
+        .arg("--version")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("languages: javascript/typescript"));
+}
+
+#[test]
+fn json_output_carries_schema_version() {
+    let repo = setup_repo();
+    let output = blast_radius(repo.path())
+        .args(["--format", "json", "file", "src/source.ts"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(json["schema_version"].as_u64().unwrap(), 1);
+}

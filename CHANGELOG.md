@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `files -` reads the file list from stdin, so changed files pipe straight in:
+  `git diff --name-only | blast-radius files -`. Blank lines and surrounding
+  whitespace are ignored; an empty list is an analysis error (exit 1).
+- `--color <auto|always|never>` — `auto` keeps the existing behavior (color
+  only on a terminal, `NO_COLOR` respected); `always` forces ANSI even when
+  piped or written via `--output`.
+- `--quiet` / `-q` — suppress stdout; exit codes and `--output` files still
+  apply, for gate-only CI usage.
+- `completions <shell>` subcommand (bash, zsh, fish, elvish, powershell).
+- `--version` now lists the language adapters compiled into the binary;
+  `-V` stays terse.
+- JSON output carries a top-level `schema_version` field (currently `1`),
+  bumped only on breaking shape changes.
+
 ## [0.3.0] - 2026-06-12
 
 ### Removed

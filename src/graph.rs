@@ -4,8 +4,14 @@ use std::path::PathBuf;
 use clap::ValueEnum;
 use serde::Serialize;
 
+/// Version of the JSON output schema. Bump on breaking changes to the
+/// serialized shape (renamed/removed fields, changed meanings); additive
+/// fields do not bump it.
+pub const SCHEMA_VERSION: u32 = 1;
+
 #[derive(Debug, Clone, Serialize)]
 pub struct AnalysisResult {
+    pub schema_version: u32,
     pub mode: AnalysisMode,
     pub target: AnalysisTarget,
     pub repo_root: PathBuf,

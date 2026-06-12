@@ -95,7 +95,18 @@ The most common setup is to run `blast-radius` on changed files so you (and
 your reviewers) see the reach of a commit before it lands.
 
 `files` takes a list of paths and reports each file's blast radius plus a
-combined total — designed to receive staged filenames from hook managers like
+combined total. Pass `-` to read the list from stdin — the natural fit for
+piping from git:
+
+```bash
+# What does my working-tree change reach?
+git diff --name-only | blast-radius files -
+
+# Gate a PR on everything it touches
+git diff --name-only origin/main...HEAD | blast-radius --fail-on-risk risky files -
+```
+
+It also receives staged filenames as arguments from hook managers like
 `lint-staged`, Husky, Lefthook, and `pre-commit`. For example, with
 `lint-staged`:
 
@@ -147,7 +158,8 @@ impact propagates.
 | ---------------------- | --------------------------------------------------- |
 | `file <path>`          | Everything that depends on this file.               |
 | `export <path> <name>` | Everything that depends on a specific named export. |
-| `files <path>...`      | Blast radius for each file plus a combined total.   |
+| `files <path>...`      | Blast radius for each file plus a combined total. `-` reads the list from stdin. |
+| `completions <shell>`  | Print a completion script (bash, zsh, fish, elvish, powershell). |
 
 Global flags:
 
@@ -157,14 +169,21 @@ Global flags:
 | `--format <tree\|json\|mermaid\|dot>` | Output format (default: `tree`).                    |
 | `--output <file>`                     | Write output to a file instead of stdout.           |
 | `--verbose`, `-v`                     | Show the full cascade tree.                         |
+| `--quiet`, `-q`                       | No stdout output; exit codes and `--output` still apply. |
+| `--color <auto\|always\|never>`       | ANSI color handling (default: `auto`; `NO_COLOR` respected). |
 | `--explain-unresolved`                | Group unresolved internal imports by likely cause.  |
 | `--fail-threshold <n>`                | Exit code 2 when more than `n` downstream files are impacted (the changed files themselves are not counted). |
 | `--fail-on-risk <tier>`               | Exit code 2 when the verdict is at or above `tier`. |
 
+`--version` prints the version plus the language adapters compiled into the
+binary, so you can tell a JS/TS-only source build from the full prebuilt one.
+
 ### Output formats
 
 - `tree` — the default human-readable verdict, meter, and impacted-file list.
-- `json` — structured output; the per-input-file breakdown lives in the `roots` array.
+- `json` — structured output; the per-input-file breakdown lives in the `roots`
+  array. Carries a top-level `schema_version` (currently `1`), bumped only on
+  breaking shape changes — new fields may appear without a bump.
 - `mermaid` — a Mermaid graph definition.
 - `dot` — Graphviz DOT.
 

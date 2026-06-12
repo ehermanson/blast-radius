@@ -103,6 +103,7 @@ pub(super) fn build_result(
     let risk_tier = compute_tier(affected, affected_packages.len());
 
     AnalysisResult {
+        schema_version: crate::graph::SCHEMA_VERSION,
         mode: metadata.mode,
         target: metadata.target,
         repo_root: context.repo_root.clone(),

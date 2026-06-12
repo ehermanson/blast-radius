@@ -1,5 +1,3 @@
-use std::io::IsTerminal;
-
 use figlet_rs::FIGlet;
 
 const LAYOUT_WIDTH: usize = 60;
@@ -20,12 +18,9 @@ pub(super) struct Theme {
 }
 
 impl Theme {
-    /// Color only when the caller allows it (e.g. not writing to `--output`),
-    /// stdout is a terminal, and `NO_COLOR` is unset.
-    pub(super) fn detect(allow_color: bool) -> Self {
-        let color = allow_color
-            && std::io::stdout().is_terminal()
-            && std::env::var_os("NO_COLOR").is_none();
+    /// The caller decides whether color is on: `--color`, terminal detection,
+    /// `NO_COLOR`, and `--output` handling all live at the CLI boundary.
+    pub(super) fn new(color: bool) -> Self {
         Self { color }
     }
 

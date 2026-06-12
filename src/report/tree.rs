@@ -11,7 +11,7 @@ mod cascade;
 use cascade::{format_mode, is_leaf, render_cascade};
 
 pub(super) fn render_tree(result: &AnalysisResult, verbose: bool, color: bool) -> String {
-    let theme = Theme::detect(color);
+    let theme = Theme::new(color);
     let assessment = assess(result);
     let mut lines = Vec::new();
 

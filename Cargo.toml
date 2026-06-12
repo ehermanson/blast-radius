@@ -35,6 +35,7 @@ svelte = []
 [dependencies]
 anyhow = "1.0"
 clap = { version = "4.5", features = ["derive"] }
+clap_complete = "4.5"
 figlet-rs = "1.0"
 ignore = "0.4"
 serde = { version = "1.0", features = ["derive"] }
