@@ -35,8 +35,10 @@ Use it to:
 - **Gate risky commits in CI or pre-commit hooks** — fail the build when a change reaches too far.
 
 It is built first and foremost for JavaScript and TypeScript repos (including
-monorepos), with first-class Vue and Svelte support and beta Python and Rust
-adapters.
+monorepos) — and that includes React: JSX/TSX is parsed natively, and JSX
+component usage is tracked at the symbol level, so it can tell a file that
+merely imports `Button` from one that actually renders `<Button />`. Vue and
+Svelte are first-class too, with Python and Rust as beta adapters.
 
 ## Quick start
 
@@ -169,7 +171,9 @@ Global flags:
 ## Language support
 
 The default binary supports **JavaScript and TypeScript** (`js`, `jsx`, `ts`,
-`tsx`), including ESM imports/exports, CommonJS `require`/`module.exports`,
+`tsx`) — React codebases are the primary target, with symbol-level JSX
+component usage tracking and `React.lazy()`/dynamic `import()` detection —
+including ESM imports/exports, CommonJS `require`/`module.exports`,
 default and named exports, barrels, `export *`, side-effect imports
 (`import './setup'`), `tsconfig.json` path aliases, `baseUrl`, `extends`
 chains (including `tsconfig.base.json`-style shared configs), package
