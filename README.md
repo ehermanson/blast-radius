@@ -161,6 +161,11 @@ impact propagates.
 | `files <path>...`      | Blast radius for each file plus a combined total. `-` reads the list from stdin. |
 | `completions <shell>`  | Print a completion script (bash, zsh, fish, elvish, powershell). |
 
+Install completions by writing the script where your shell looks for them,
+e.g. `blast-radius completions zsh > ~/.zfunc/_blast-radius` (zsh, with
+`~/.zfunc` in `fpath`) or
+`blast-radius completions bash > /etc/bash_completion.d/blast-radius`.
+
 Global flags:
 
 | Flag                                  | Purpose                                             |
@@ -183,7 +188,8 @@ binary, so you can tell a JS/TS-only source build from the full prebuilt one.
 - `tree` — the default human-readable verdict, meter, and impacted-file list.
 - `json` — structured output; the per-input-file breakdown lives in the `roots`
   array. Carries a top-level `schema_version` (currently `1`), bumped only on
-  breaking shape changes — new fields may appear without a bump.
+  breaking shape changes — new fields may appear without a bump. The full
+  field-by-field contract is in `docs/json-output.md`.
 - `mermaid` — a Mermaid graph definition.
 - `dot` — Graphviz DOT.
 

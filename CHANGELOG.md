@@ -21,7 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--version` now lists the language adapters compiled into the binary;
   `-V` stays terse.
 - JSON output carries a top-level `schema_version` field (currently `1`),
-  bumped only on breaking shape changes.
+  bumped only on breaking shape changes; the full field-by-field contract is
+  now documented in `docs/json-output.md`.
 
 ## [0.3.0] - 2026-06-12
 
