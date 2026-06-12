@@ -66,6 +66,17 @@ struct TsConfigFile {
     extends: Option<serde_json::Value>,
     #[serde(default, rename = "compilerOptions")]
     compiler_options: RawCompilerOptions,
+    /// Project references (`"references": [{ "path": "../lib" }]`). Followed so
+    /// referenced configs with non-standard names (tsconfig.lib.json) still
+    /// contribute their aliases; directory references resolve to the
+    /// `tsconfig.json` inside, which repo discovery usually finds anyway.
+    #[serde(default)]
+    references: Vec<TsConfigReference>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TsConfigReference {
+    path: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -131,6 +142,9 @@ impl RepoContext {
                         if !config.compiler_options.has_aliases() {
                             tsconfigs.extend(load_sibling_tsconfigs(&path, &mut warnings));
                         }
+                        // Project references can point at configs with
+                        // non-standard names (tsconfig.lib.json) the walk skips.
+                        tsconfigs.extend(load_referenced_tsconfigs(&path, &mut warnings));
                         tsconfigs.push(config);
                     }
                     Err(error) => warnings.push(format!("{error:#}")),
@@ -146,6 +160,8 @@ impl RepoContext {
 
         source_files.sort();
         tsconfigs.sort_by(|a, b| a.path.cmp(&b.path));
+        // Referenced configs can duplicate walk-discovered ones.
+        tsconfigs.dedup_by(|a, b| a.path == b.path);
         package_jsons.sort();
 
         Ok(Self {
@@ -199,15 +215,7 @@ fn load_tsconfig(path: &Path) -> Result<TsConfigPath> {
     })
 }
 
-/// Load a config's options after following its `extends` chain. Child fields
-/// shallow-override parents; `paths` replaces wholesale when redeclared.
-fn load_tsconfig_options(path: &Path, visited: &mut HashSet<PathBuf>) -> Result<TsCompilerOptions> {
-    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    if !visited.insert(canonical) {
-        // `extends` cycle: treat the revisited config as empty.
-        return Ok(TsCompilerOptions::default());
-    }
-
+fn parse_tsconfig_file(path: &Path) -> Result<TsConfigFile> {
     let contents = fs::read_to_string(path)
         .with_context(|| format!("failed to read tsconfig {}", path.display()))?;
     let value: serde_json::Value = parse_to_serde_value(
@@ -223,8 +231,20 @@ fn load_tsconfig_options(path: &Path, visited: &mut HashSet<PathBuf>) -> Result<
         },
     )
     .with_context(|| format!("failed to parse tsconfig {}", path.display()))?;
-    let parsed: TsConfigFile = serde_json::from_value(value)
-        .with_context(|| format!("failed to decode tsconfig {}", path.display()))?;
+    serde_json::from_value(value)
+        .with_context(|| format!("failed to decode tsconfig {}", path.display()))
+}
+
+/// Load a config's options after following its `extends` chain. Child fields
+/// shallow-override parents; `paths` replaces wholesale when redeclared.
+fn load_tsconfig_options(path: &Path, visited: &mut HashSet<PathBuf>) -> Result<TsCompilerOptions> {
+    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    if !visited.insert(canonical) {
+        // `extends` cycle: treat the revisited config as empty.
+        return Ok(TsCompilerOptions::default());
+    }
+
+    let parsed = parse_tsconfig_file(path)?;
 
     let dir = path.parent().unwrap_or(Path::new("."));
     let mut merged = TsCompilerOptions::default();
@@ -284,6 +304,62 @@ fn resolve_extends_target(dir: &Path, specifier: &str) -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// Follow `references` entries to their config files and load any that carry
+/// aliases. Directory references resolve to the `tsconfig.json` inside (which
+/// repo discovery usually finds on its own); file references pick up
+/// non-standard names like `tsconfig.lib.json` that discovery skips. Chained
+/// references are followed with cycle protection.
+fn load_referenced_tsconfigs(tsconfig: &Path, warnings: &mut Vec<String>) -> Vec<TsConfigPath> {
+    let mut configs = Vec::new();
+    let mut visited = HashSet::new();
+    let canonical = tsconfig
+        .canonicalize()
+        .unwrap_or_else(|_| tsconfig.to_path_buf());
+    visited.insert(canonical);
+    collect_referenced_tsconfigs(tsconfig, &mut visited, &mut configs, warnings);
+    configs
+}
+
+fn collect_referenced_tsconfigs(
+    tsconfig: &Path,
+    visited: &mut HashSet<PathBuf>,
+    configs: &mut Vec<TsConfigPath>,
+    warnings: &mut Vec<String>,
+) {
+    let Ok(parsed) = parse_tsconfig_file(tsconfig) else {
+        // Unreadable configs are already reported by the primary load.
+        return;
+    };
+    let Some(dir) = tsconfig.parent() else {
+        return;
+    };
+
+    for reference in &parsed.references {
+        let target = crate::resolve::clean_path(&dir.join(&reference.path));
+        let target = if target.is_dir() {
+            target.join("tsconfig.json")
+        } else {
+            target
+        };
+        if !target.is_file() {
+            continue;
+        }
+        let canonical = target.canonicalize().unwrap_or_else(|_| target.clone());
+        if !visited.insert(canonical) {
+            continue;
+        }
+        match load_tsconfig(&target) {
+            Ok(config) => {
+                if config.compiler_options.has_aliases() {
+                    configs.push(config);
+                }
+                collect_referenced_tsconfigs(&target, visited, configs, warnings);
+            }
+            Err(error) => warnings.push(format!("{error:#}")),
+        }
+    }
 }
 
 /// Probe well-known sibling configs that hold path aliases in Nx and Vite
@@ -400,6 +476,34 @@ mod tests {
         assert_eq!(
             repo.ignore_unresolved,
             vec!["styled-system/css".to_string(), ".velite".to_string()]
+        );
+    }
+
+    #[test]
+    fn follows_project_references_to_nonstandard_config_names() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("lib/src")).unwrap();
+        fs::write(
+            dir.path().join("tsconfig.json"),
+            r#"{ "files": [], "references": [{ "path": "./lib/tsconfig.lib.json" }] }"#,
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("lib/tsconfig.lib.json"),
+            r#"{ "compilerOptions": { "baseUrl": ".", "paths": { "@lib/*": ["src/*"] } } }"#,
+        )
+        .unwrap();
+        fs::write(dir.path().join("lib/src/util.ts"), "export const x = 1;").unwrap();
+
+        let repo = RepoContext::discover(dir.path()).unwrap();
+
+        assert_eq!(repo.tsconfigs.len(), 2, "referenced config must be loaded");
+        assert!(
+            repo.tsconfigs
+                .iter()
+                .any(|config| config.path.ends_with("tsconfig.lib.json")
+                    && config.compiler_options.has_aliases()),
+            "tsconfig.lib.json aliases must be available"
         );
     }
 

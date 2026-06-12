@@ -201,8 +201,10 @@ component usage tracking and `React.lazy()`/dynamic `import()` detection —
 including ESM imports/exports, CommonJS `require`/`module.exports`,
 default and named exports, barrels, `export *`, side-effect imports
 (`import './setup'`), `tsconfig.json` path aliases, `baseUrl`, `extends`
-chains (including `tsconfig.base.json`-style shared configs), package
-`imports`/`exports`, `.js` specifiers backed by TypeScript source files,
+chains (including `tsconfig.base.json`-style shared configs), project
+`references` (aliases in referenced configs like `tsconfig.lib.json` are
+honored), package `imports`/`exports`, the `browser` entry field,
+`.js` specifiers backed by TypeScript source files,
 `.d.ts` declaration files, and cross-package resolution across workspace
 packages.
 

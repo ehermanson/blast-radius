@@ -34,6 +34,10 @@ struct PackageJson {
     source: Option<String>,
     #[serde(default)]
     types: Option<String>,
+    /// `browser` is a string entry point in older browser-first packages, or an
+    /// object remapping paths (only the string form names an entry).
+    #[serde(default)]
+    browser: Option<Value>,
     #[serde(default)]
     exports: Option<Value>,
     #[serde(default)]
@@ -74,10 +78,21 @@ pub(super) fn load_package_info(path: &Path) -> Result<Option<PackageInfo>> {
     }
 
     let root = path.parent().unwrap_or(path).to_path_buf();
+    let browser_entry = parsed
+        .browser
+        .as_ref()
+        .and_then(Value::as_str)
+        .map(str::to_string);
     let mut entry_candidates = Vec::new();
-    for value in [parsed.source, parsed.module, parsed.types, parsed.main]
-        .into_iter()
-        .flatten()
+    for value in [
+        parsed.source,
+        parsed.module,
+        browser_entry,
+        parsed.types,
+        parsed.main,
+    ]
+    .into_iter()
+    .flatten()
     {
         entry_candidates.push(root.join(value));
     }

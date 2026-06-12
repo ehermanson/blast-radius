@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `tsconfig.json` project `references` are followed, so path aliases declared
+  in referenced configs with non-standard names (`tsconfig.lib.json`) resolve.
+  Directory references, chained references, and cycles are handled.
+- The string form of package.json's `browser` field is honored as an entry
+  point (after `source` and `module`), so older browser-first packages
+  resolve; the object (path-remapping) form is ignored safely.
+
+### Fixed
+
+- `export * as ns from './x'` is now member-precise: changing one export of
+  `x` impacts only consumers that touch that member through the namespace
+  object (`ns.Button` in code or JSX, including through aliased re-exports
+  like `export { ns as kit }`), instead of every consumer of the namespace.
+  Wholesale uses of the object still count as depending on every member, and
+  nested namespace-of-namespace chains over-approximate rather than miss.
+- Member usage is now tracked for named and default imports (not just
+  `import * as` namespaces), enabling the precision above.
+
 ## [0.4.0] - 2026-06-12
 
 ### Added

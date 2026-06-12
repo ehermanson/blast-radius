@@ -51,7 +51,15 @@ impl UsageCollector {
     fn mark_jsx_member(&mut self, expr: &JSXMemberExpr) {
         if let JSXObject::Ident(object) = &expr.obj {
             let namespace = object.sym.to_string();
-            if self.namespace_locals.contains(&namespace) {
+            if self.namespace_locals.contains(&namespace)
+                || self.imported_locals.contains(&namespace)
+            {
+                // Named imports of namespace objects (`export * as ns` consumed
+                // via `import { ns }`) get member tracking too; the object
+                // itself still counts as used so the usage gate passes.
+                if self.imported_locals.contains(&namespace) {
+                    self.used_locals.insert(namespace.clone());
+                }
                 self.namespace_member_usage
                     .entry(namespace)
                     .or_default()
@@ -77,7 +85,8 @@ impl Visit for UsageCollector {
     fn visit_member_expr(&mut self, member: &MemberExpr) {
         if let Expr::Ident(object) = &*member.obj {
             let namespace = object.sym.to_string();
-            if self.namespace_locals.contains(&namespace)
+            if (self.namespace_locals.contains(&namespace)
+                || self.imported_locals.contains(&namespace))
                 && let MemberProp::Ident(prop) = &member.prop
             {
                 self.namespace_member_usage

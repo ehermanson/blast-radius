@@ -235,11 +235,44 @@ pub(super) fn run_bfs(
                         file_affected = true;
                         edge_kind = Some(*kind);
                         ambiguous = *is_ambiguous;
-                        if matches!(imported, ReexportTarget::All) {
-                            newly_added_exports.extend(current_exports.clone());
-                        } else if exported != "*" {
-                            newly_added_exports.insert(exported.clone());
-                            child_id = export_id(&link.consumer_file, exported);
+                        match imported {
+                            ReexportTarget::All => {
+                                newly_added_exports.extend(current_exports.clone());
+                            }
+                            // `export * as ns`: qualify the affected upstream
+                            // exports under the alias (`ns.Button`) so member-level
+                            // consumers stay precise. A non-enumerable upstream
+                            // (`*file*`) collapses to the bare alias: the whole
+                            // object is affected.
+                            ReexportTarget::Namespace if exported != "*" => {
+                                if current_exports.contains("*file*") {
+                                    newly_added_exports.insert(exported.clone());
+                                } else {
+                                    for export in &current_exports {
+                                        newly_added_exports.insert(format!("{exported}.{export}"));
+                                    }
+                                }
+                                child_id = export_id(&link.consumer_file, exported);
+                            }
+                            // A named re-export of a namespace object
+                            // (`export { ns as kit } from './barrel'`) carries the
+                            // qualified members across under the new alias.
+                            ReexportTarget::Name(name) if exported != "*" => {
+                                if current_exports.contains(name)
+                                    || current_exports.contains("*file*")
+                                {
+                                    newly_added_exports.insert(exported.clone());
+                                }
+                                for member in member_entries(&current_exports, name) {
+                                    newly_added_exports.insert(format!("{exported}.{member}"));
+                                }
+                                child_id = export_id(&link.consumer_file, exported);
+                            }
+                            _ if exported != "*" => {
+                                newly_added_exports.insert(exported.clone());
+                                child_id = export_id(&link.consumer_file, exported);
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -399,7 +432,6 @@ fn import_target_matches(
     module: &ModuleFacts,
     local: &str,
 ) -> bool {
-    let _ = module;
     // `*file*` marks a file-level root whose exports are not statically
     // enumerable (e.g. a star-only barrel): the whole file changed, so any
     // import that resolves to it is affected.
@@ -409,7 +441,21 @@ fn import_target_matches(
     match imported {
         // The importer depends on the whole file, whatever changed in it.
         ImportTarget::SideEffect => true,
-        ImportTarget::Name(name) => current_exports.contains(name),
+        ImportTarget::Name(name) => {
+            if current_exports.contains(name) {
+                return true;
+            }
+            // The name may be a namespace object whose affected members travel
+            // as qualified entries (`ns.Button`). When the consumer's member
+            // usage is known, match member-precisely; otherwise any affected
+            // member means the object the consumer holds is affected.
+            match module.namespace_member_usage.get(local) {
+                Some(members) => members
+                    .iter()
+                    .any(|member| qualified_hit(current_exports, name, member)),
+                None => !member_entries(current_exports, name).is_empty(),
+            }
+        }
         ImportTarget::Default => {
             current_exports.contains("default") || current_exports.contains(local)
         }
@@ -417,9 +463,10 @@ fn import_target_matches(
             .namespace_member_usage
             .get(local)
             .map(|members| {
-                members
-                    .iter()
-                    .any(|member| current_exports.contains(member))
+                members.iter().any(|member| {
+                    current_exports.contains(member)
+                        || !member_entries(current_exports, member).is_empty()
+                })
             })
             .unwrap_or_else(|| module.used_locals.contains(local) && !current_exports.is_empty()),
     }
@@ -430,11 +477,40 @@ fn reexport_matches(imported: &ReexportTarget, current_exports: &BTreeSet<String
         return true;
     }
     match imported {
-        ReexportTarget::Name(name) => current_exports.contains(name),
+        ReexportTarget::Name(name) => {
+            current_exports.contains(name) || !member_entries(current_exports, name).is_empty()
+        }
         ReexportTarget::Default => current_exports.contains("default"),
         ReexportTarget::Namespace => !current_exports.is_empty(),
         ReexportTarget::All => !current_exports.is_empty(),
     }
+}
+
+/// Affected-export entries qualified under `name` (`name.<member>`), returned
+/// as the member part. `ns.Button` under `ns` yields `Button`; deeper chains
+/// (`outer.ns.Button` under `outer`) yield `ns.Button`.
+fn member_entries<'a>(current_exports: &'a BTreeSet<String>, name: &str) -> Vec<&'a str> {
+    current_exports
+        .iter()
+        .filter_map(|entry| {
+            entry
+                .strip_prefix(name)
+                .and_then(|rest| rest.strip_prefix('.'))
+        })
+        .collect()
+}
+
+/// Whether `name.member` is affected, either exactly or as a prefix of a
+/// deeper qualified entry (`ns.Button` hits for member `Button`; `outer.ns.X`
+/// hits for member `ns` under `outer`).
+fn qualified_hit(current_exports: &BTreeSet<String>, name: &str, member: &str) -> bool {
+    current_exports.iter().any(|entry| {
+        entry
+            .strip_prefix(name)
+            .and_then(|rest| rest.strip_prefix('.'))
+            .and_then(|rest| rest.strip_prefix(member))
+            .is_some_and(|tail| tail.is_empty() || tail.starts_with('.'))
+    })
 }
 
 fn is_jsx_usage(module: &ModuleFacts, local: &str) -> bool {

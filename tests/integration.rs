@@ -1370,3 +1370,95 @@ fn verbose_cascade_shows_barrels_without_false_direct_attribution() {
     // Repeated subtrees collapse to a back-reference instead of re-printing.
     assert!(paths_section.contains("(paths shown above)"), "{stdout}");
 }
+
+/// `export * as ns from './x'` must stay member-precise: a change to one
+/// export of the underlying module impacts only consumers that touch that
+/// member through the namespace object (named-import, JSX, aliased re-export),
+/// while wholesale users of the object are always impacted.
+#[test]
+fn namespace_reexport_tracks_member_usage_precisely() {
+    let repo = tempdir().unwrap();
+    fs::create_dir_all(repo.path().join("src")).unwrap();
+    fs::write(repo.path().join("package.json"), r#"{"name":"ns-fixture"}"#).unwrap();
+    fs::write(
+        repo.path().join("src/widgets.ts"),
+        "export const Button = 1;\nexport const Card = 2;\n",
+    )
+    .unwrap();
+    fs::write(
+        repo.path().join("src/barrel.ts"),
+        "export * as UI from './widgets';\n",
+    )
+    .unwrap();
+    fs::write(
+        repo.path().join("src/button-user.ts"),
+        "import { UI } from './barrel';\nconsole.log(UI.Button);\n",
+    )
+    .unwrap();
+    fs::write(
+        repo.path().join("src/card-user.tsx"),
+        "import { UI } from './barrel';\nexport const App = () => <UI.Card />;\n",
+    )
+    .unwrap();
+    fs::write(
+        repo.path().join("src/alias-barrel.ts"),
+        "export { UI as Widgets } from './barrel';\n",
+    )
+    .unwrap();
+    fs::write(
+        repo.path().join("src/alias-user.ts"),
+        "import { Widgets } from './alias-barrel';\nconsole.log(Widgets.Button);\n",
+    )
+    .unwrap();
+    fs::write(
+        repo.path().join("src/wholesale-user.ts"),
+        "import { UI } from './barrel';\nexport function dump(x: unknown) {}\ndump(UI);\n",
+    )
+    .unwrap();
+
+    let json = run_json(repo.path(), &["export", "src/widgets.ts", "Button"]);
+    let labels = node_labels(&json);
+    for expected in [
+        "src/barrel.ts",
+        "src/button-user.ts",
+        "src/alias-barrel.ts",
+        "src/alias-user.ts",
+        "src/wholesale-user.ts",
+    ] {
+        assert!(
+            labels.iter().any(|label| label == expected),
+            "Button change must reach {expected}; got {labels:?}"
+        );
+    }
+    assert!(
+        !labels.iter().any(|label| label == "src/card-user.tsx"),
+        "Button change must not reach the UI.Card-only consumer; got {labels:?}"
+    );
+
+    let json = run_json(repo.path(), &["export", "src/widgets.ts", "Card"]);
+    let labels = node_labels(&json);
+    assert!(
+        labels.iter().any(|label| label == "src/card-user.tsx"),
+        "Card change must reach the JSX UI.Card consumer; got {labels:?}"
+    );
+    for excluded in ["src/button-user.ts", "src/alias-user.ts"] {
+        assert!(
+            !labels.iter().any(|label| label == excluded),
+            "Card change must not reach {excluded}; got {labels:?}"
+        );
+    }
+    assert!(
+        labels.iter().any(|label| label == "src/wholesale-user.ts"),
+        "wholesale namespace users depend on every member; got {labels:?}"
+    );
+
+    // Querying the namespace object itself impacts every member consumer.
+    let json = run_json(repo.path(), &["export", "src/barrel.ts", "UI"]);
+    let labels = node_labels(&json);
+    for expected in ["src/button-user.ts", "src/card-user.tsx"] {
+        assert!(
+            labels.iter().any(|label| label == expected),
+            "whole-object query must reach {expected}; got {labels:?}"
+        );
+    }
+}

@@ -962,3 +962,69 @@ fn resolves_rust_crate_super_self_and_mod_imports() {
     assert!(resolver.is_internal_specifier(&email, "crate::models"));
     assert!(!resolver.is_internal_specifier(&email, "serde"));
 }
+
+#[test]
+fn resolves_browser_field_entry_point() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("packages/legacy/lib")).unwrap();
+    fs::create_dir_all(dir.path().join("apps/web/src")).unwrap();
+    fs::write(
+        dir.path().join("packages/legacy/package.json"),
+        r#"{ "name": "@acme/legacy", "browser": "./lib/browser.js" }"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("packages/legacy/lib/browser.js"),
+        "module.exports = { legacy: true };",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("apps/web/src/App.tsx"),
+        "import legacy from '@acme/legacy';",
+    )
+    .unwrap();
+
+    let context = RepoContext::discover(dir.path()).unwrap();
+    let resolver = Resolver::new(&context).unwrap();
+    let importer = dir.path().join("apps/web/src/App.tsx");
+
+    assert!(matches!(
+        resolver.resolve(&importer, "@acme/legacy"),
+        Resolution::Resolved(path) if path.ends_with("packages/legacy/lib/browser.js")
+    ));
+}
+
+#[test]
+fn browser_object_form_does_not_break_entry_resolution() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("packages/mapped/src")).unwrap();
+    fs::create_dir_all(dir.path().join("apps/web/src")).unwrap();
+    fs::write(
+        dir.path().join("packages/mapped/package.json"),
+        r#"{
+            "name": "@acme/mapped",
+            "main": "./src/index.js",
+            "browser": { "./src/node-only.js": "./src/stub.js" }
+        }"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("packages/mapped/src/index.js"),
+        "module.exports = 1;",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("apps/web/src/App.tsx"),
+        "import mapped from '@acme/mapped';",
+    )
+    .unwrap();
+
+    let context = RepoContext::discover(dir.path()).unwrap();
+    let resolver = Resolver::new(&context).unwrap();
+    let importer = dir.path().join("apps/web/src/App.tsx");
+
+    assert!(matches!(
+        resolver.resolve(&importer, "@acme/mapped"),
+        Resolution::Resolved(path) if path.ends_with("packages/mapped/src/index.js")
+    ));
+}
