@@ -87,9 +87,10 @@ test('unresolved imports / parse failures are caveats, not a "partial" verdict',
   assert.ok(!md.includes('partial'));
 });
 
-test('footer is divided from the body and links back to the project', () => {
+test('footer has a thin divider and links back to the project', () => {
   const md = renderComment(impactResult);
-  assert.match(md, /\n---\n/);
+  assert.match(md, /─+<br>/); // thin rule, not a heavy markdown `---`
+  assert.ok(!md.includes('\n---\n'));
   assert.match(md, /<a href="https:\/\/github\.com\/ehermanson\/blast-radius">blast-radius<\/a>/);
 });
 
