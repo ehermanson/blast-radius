@@ -81,15 +81,16 @@ test('unresolved imports / parse failures are caveats, not a "partial" verdict',
     ...impactResult,
     summary: { ...impactResult.summary, unresolved_imports: 187, parse_failures: 1 },
   });
-  assert.match(md, /confidence: high/);
+  assert.match(md, />confidence<\/a>: high/);
   assert.match(md, /187 unresolved imports repo-wide may hide consumers/);
   assert.match(md, /1 parse failures may hide consumers/);
   assert.ok(!md.includes('partial'));
 });
 
-test('footer is a small footnote linking back to the project, no divider', () => {
+test('footer is a small footnote: confidence links to its docs, plus a project link, no divider', () => {
   const md = renderComment(impactResult);
-  assert.match(md, /<sub>confidence: high · <a href="https:\/\/github\.com\/ehermanson\/blast-radius">blast-radius<\/a><\/sub>/);
+  assert.match(md, /<a href="https:\/\/github\.com\/ehermanson\/blast-radius#confidence">confidence<\/a>: high/);
+  assert.match(md, /<a href="https:\/\/github\.com\/ehermanson\/blast-radius">blast-radius<\/a><\/sub>/);
   assert.ok(!md.includes('---'));
   assert.ok(!md.includes('─'));
 });
@@ -102,7 +103,7 @@ test('ambiguous edges on the impacted paths downgrade the verdict to partial', (
       { from: 'b', to: 'c', kind: 'imports_named', is_ambiguous: false },
     ],
   });
-  assert.match(md, /confidence: partial — 1 ambiguous edge on these paths/);
+  assert.match(md, />confidence<\/a>: partial — 1 ambiguous edge on these paths/);
 });
 
 test('multiple changed files get a per-file impact breakdown', () => {

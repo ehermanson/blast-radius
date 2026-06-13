@@ -13,6 +13,7 @@
 export const MARKER = '<!-- blast-radius -->';
 
 const REPO_URL = 'https://github.com/ehermanson/blast-radius';
+const CONFIDENCE_URL = `${REPO_URL}#confidence`;
 
 const TIERS = {
   minor: { label: 'Minor', emoji: '🟢' },
@@ -141,10 +142,13 @@ function confidenceNote(result) {
   const total = summary.total_affected_files || 0;
   const onPathAmbiguous = (result.edges || []).filter((e) => e.is_ambiguous).length;
 
+  // "confidence" links to its explanation, so the jargon (ambiguous edges, "may
+  // hide consumers") is one click from a definition without bloating the comment.
+  const label = `<a href="${CONFIDENCE_URL}">confidence</a>`;
   let note =
     total === 0 || onPathAmbiguous === 0
-      ? 'confidence: high'
-      : `confidence: partial — ${onPathAmbiguous} ambiguous ${plural(onPathAmbiguous, 'edge')} on these paths`;
+      ? `${label}: high`
+      : `${label}: partial — ${onPathAmbiguous} ambiguous ${plural(onPathAmbiguous, 'edge')} on these paths`;
 
   const caveats = [];
   if (total > 0 && summary.unresolved_imports) {

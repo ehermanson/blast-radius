@@ -172,11 +172,27 @@ marked `◎ endpoint` are leaves nothing else depends on (apps, routes, pages) �
 a signal the change can reach something user-facing. Past 200 impacted files
 the per-file lists collapse to directory rollups; pass `-v` to list every file.
 
-The last line reports **confidence**: how many files were scanned and whether
-any import edges were ambiguous, so you know how much to trust the result.
+The last line reports **confidence** — see below.
 
 Pass `--verbose` (`-v`) to see the full root → cascade tree of exactly how the
 impact propagates.
+
+### Confidence
+
+The result ends with a confidence read so you know how much to trust it:
+
+- **high** — every import edge on the impacted paths resolved cleanly.
+- **partial — N ambiguous edges on these paths** — some edges the result was
+  traced through couldn't be pinned to a single target (e.g. a symbol re-exported
+  by several barrels), so a few listed files may be over-attributed.
+
+Two repo-wide caveats can be appended because their targets are unknown, so they
+might hide *additional* consumers not listed:
+
+- **N unresolved imports** — internal-looking imports that didn't resolve to a
+  file (often generated/virtual modules or build output). Quiet these with
+  `.blast-radius.json` (see [Configuration](#configuration)).
+- **N parse failures** — files that couldn't be parsed and were skipped.
 
 ## Commands
 
