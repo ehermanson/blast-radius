@@ -283,27 +283,39 @@ fn file_root_exports(
 }
 
 fn load_modules(context: &RepoContext) -> (BTreeMap<PathBuf, ModuleFacts>, Vec<String>, usize) {
+    use rayon::prelude::*;
+
+    // Parsing each file is independent, so fan the parses out across cores. The
+    // results are collected in source order and folded sequentially below, so
+    // the module map, warning order, and failure count are identical regardless
+    // of how many threads ran — tests and the accuracy oracle depend on that.
+    let parsed: Vec<(PathBuf, Result<ModuleFacts>)> = context
+        .source_files
+        .par_iter()
+        .map(|file| (file.clone(), parse_module(file)))
+        .collect();
+
     let mut modules = BTreeMap::new();
     let mut warnings = Vec::new();
     let mut parse_failures = 0;
-    for file in &context.source_files {
-        match parse_module(file) {
+    for (file, result) in parsed {
+        match result {
             Ok(facts) => {
-                let relative = file.strip_prefix(&context.repo_root).unwrap_or(file);
+                let relative = file.strip_prefix(&context.repo_root).unwrap_or(&file);
                 warnings.extend(
                     facts
                         .warnings
                         .iter()
                         .map(|warning| format!("{}: {warning}", relative.display())),
                 );
-                modules.insert(file.clone(), facts);
+                modules.insert(file, facts);
             }
             Err(error) => {
                 parse_failures += 1;
                 warnings.push(format!(
                     "skipped {}: {}",
                     file.strip_prefix(&context.repo_root)
-                        .unwrap_or(file)
+                        .unwrap_or(&file)
                         .display(),
                     error
                 ));

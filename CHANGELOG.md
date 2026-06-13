@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Source files are now parsed in parallel (rayon), roughly halving cold-cache
+  analysis of large repos (the 2,700-file Chakra UI snapshot drops from ~1.1s to
+  ~0.55s). Output is unchanged and deterministic regardless of thread count.
+
 ## [0.7.0] - 2026-06-13
 
 ### Added
