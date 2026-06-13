@@ -13,7 +13,7 @@ them.
 | Field               | Type     | Meaning                                                                 |
 | ------------------- | -------- | ----------------------------------------------------------------------- |
 | `schema_version`    | number   | Schema version of this document. Currently `1`.                         |
-| `mode`              | string   | `"export"`, `"file"`, or `"files"` — which subcommand ran.              |
+| `mode`              | string   | `"export"`, `"file"`, `"files"`, or `"graph"` — which subcommand ran.   |
 | `target`            | object   | The analyzed input, tagged by `kind` (see below).                       |
 | `repo_root`         | string   | Absolute path of the analyzed repository root.                          |
 | `source_file_count` | number   | How many source files were discovered and indexed.                      |
@@ -31,6 +31,17 @@ Tagged union on `kind`:
 - `{ "kind": "export", "file": "...", "export_name": "..." }`
 - `{ "kind": "file", "file": "..." }`
 - `{ "kind": "files", "files": ["...", ...] }`
+- `{ "kind": "graph" }` — the `graph` command. There is no single target; read
+  `nodes`/`edges`. `summary` carries defaults and is not meaningful in this mode
+  (only `unresolved_imports` and `parse_failures` are populated).
+
+## Graph mode
+
+`blast-radius graph` dumps the whole-repo import graph: every indexed source
+file is a `file` node, and every resolved import or re-export is an edge. As
+everywhere else, edges run `from` the depended-upon file `to` the consumer, so
+to read import direction, flip them (`to` imports `from`). Unlike impact
+queries, `depth` is always `0` and `roots` is empty.
 
 ## `summary`
 

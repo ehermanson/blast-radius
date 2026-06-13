@@ -214,6 +214,7 @@ fn relative_target(result: &AnalysisResult) -> String {
         AnalysisTarget::Export { file, .. } => Some(file),
         AnalysisTarget::File { file } => Some(file),
         AnalysisTarget::Files { files } => files.first(),
+        AnalysisTarget::Graph => None,
     };
     file.map(|file| {
         normalize_separators(
@@ -242,6 +243,7 @@ fn format_subject(target: &AnalysisTarget) -> String {
                 .to_string(),
             _ => format!("{} files", files.len()),
         },
+        AnalysisTarget::Graph => "the import graph".to_string(),
     }
 }
 

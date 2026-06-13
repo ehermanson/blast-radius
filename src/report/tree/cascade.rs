@@ -89,6 +89,7 @@ pub(super) fn format_mode(mode: &AnalysisMode) -> &'static str {
         AnalysisMode::Export => "export",
         AnalysisMode::File => "file",
         AnalysisMode::Files => "files",
+        AnalysisMode::Graph => "graph",
     }
 }
 
@@ -112,6 +113,8 @@ fn preferred_root(result: &AnalysisResult) -> Option<String> {
             let preferred_refs: Vec<&str> = preferred.iter().map(String::as_str).collect();
             find_existing_node(result, &preferred_refs)
         }
+        // graph mode never renders a cascade tree (intercepted in report::render).
+        AnalysisTarget::Graph => None,
     }
 }
 

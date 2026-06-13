@@ -159,6 +159,7 @@ impact propagates.
 | `file <path>`          | Everything that depends on this file.               |
 | `export <path> <name>` | Everything that depends on a specific named export. |
 | `files <path>...`      | Blast radius for each file plus a combined total. `-` reads the list from stdin. |
+| `graph`                | Dump the whole-repo import graph (every file and resolved import edge). |
 | `completions <shell>`  | Print a completion script (bash, zsh, fish, elvish, powershell). |
 
 Install completions by writing the script where your shell looks for them,

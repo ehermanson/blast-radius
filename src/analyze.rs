@@ -5,12 +5,15 @@ use anyhow::{Context, Result, bail};
 
 use crate::cli::{Cli, Command};
 use crate::fs::RepoContext;
-use crate::graph::{AnalysisMode, AnalysisResult, AnalysisTarget, ModuleState};
+use crate::graph::{
+    AnalysisMode, AnalysisResult, AnalysisTarget, EdgeKind, GraphEdge, GraphNode, ModuleState,
+    NodeKind, Summary,
+};
 use crate::parse::{ExportKind, ModuleFacts, ReexportTarget, parse_module};
 use crate::resolve::{Resolution, Resolver};
 
 mod walk;
-use walk::{ConsumerLink, build_reverse_links, compute_root_impacts, run_bfs};
+use walk::{ConsumerLink, build_reverse_links, compute_root_impacts, import_edge_kind, run_bfs};
 
 mod result;
 use result::{ResultMetadata, build_result, collect_workspaces};
@@ -87,6 +90,14 @@ pub fn run(cli: &Cli, context: &RepoContext) -> Result<AnalysisResult> {
     match &cli.command {
         // Handled in main before analysis ever runs.
         Command::Completions { .. } => bail!("completions does not run analysis"),
+        Command::Graph => Ok(build_graph_result(
+            context,
+            &modules,
+            &mut resolution_cache,
+            warnings,
+            parse_failures,
+            unresolved.count,
+        )),
         Command::Export { file, export_name } => {
             let file = normalize_input_path(&context.repo_root, file)?;
             if !modules.contains_key(&file) {
@@ -300,6 +311,107 @@ fn load_modules(context: &RepoContext) -> (BTreeMap<PathBuf, ModuleFacts>, Vec<S
         }
     }
     (modules, warnings, parse_failures)
+}
+
+/// The `graph` command: dump the whole-repo import graph in one pass. Every
+/// indexed source file is a node; every resolved import/re-export is an edge
+/// `from` the depended-upon file `to` the consumer — the same direction as
+/// impact-query edges, so consumers flip it the same way to read import
+/// direction. `summary`/`risk_tier` carry their defaults and are not meaningful
+/// here (`mode` is `graph`).
+fn build_graph_result(
+    context: &RepoContext,
+    modules: &BTreeMap<PathBuf, ModuleFacts>,
+    resolution_cache: &mut ResolutionCache<'_>,
+    mut warnings: Vec<String>,
+    parse_failures: usize,
+    unresolved_imports: usize,
+) -> AnalysisResult {
+    if parse_failures > 0 {
+        warnings.insert(
+            0,
+            format!(
+                "{} source file{} could not be parsed and {} skipped",
+                parse_failures,
+                if parse_failures == 1 { "" } else { "s" },
+                if parse_failures == 1 { "was" } else { "were" }
+            ),
+        );
+    }
+
+    let nodes: Vec<GraphNode> = context
+        .source_files
+        .iter()
+        .map(|file| GraphNode {
+            id: file_id(file),
+            label: relative_label(&context.repo_root, file),
+            file: file.clone(),
+            symbol: None,
+            kind: NodeKind::File,
+            depth: 0,
+        })
+        .collect();
+
+    let mut edges = Vec::new();
+    let mut seen = BTreeSet::new();
+    let mut push_edge = |from: &Path, to: &Path, kind: EdgeKind| {
+        if from == to {
+            return;
+        }
+        let from_id = file_id(from);
+        let to_id = file_id(to);
+        if seen.insert((from_id.clone(), to_id.clone(), kind)) {
+            edges.push(GraphEdge {
+                from: from_id,
+                to: to_id,
+                kind,
+                is_ambiguous: false,
+            });
+        }
+    };
+
+    for module in modules.values() {
+        for import in &module.imports {
+            if let Resolution::Resolved(target) =
+                resolution_cache.resolve(&module.file, &import.source)
+            {
+                push_edge(
+                    &target,
+                    &module.file,
+                    import_edge_kind(&import.imported, import.kind),
+                );
+            }
+        }
+        for reexport in &module.reexports {
+            if let Resolution::Resolved(target) =
+                resolution_cache.resolve(&module.file, &reexport.source)
+            {
+                let kind = match reexport.imported {
+                    ReexportTarget::All => EdgeKind::ReexportsStar,
+                    _ => EdgeKind::ReexportsNamed,
+                };
+                push_edge(&target, &module.file, kind);
+            }
+        }
+    }
+
+    AnalysisResult {
+        schema_version: crate::graph::SCHEMA_VERSION,
+        mode: AnalysisMode::Graph,
+        target: AnalysisTarget::Graph,
+        repo_root: context.repo_root.clone(),
+        source_file_count: context.source_files.len(),
+        summary: Summary {
+            unresolved_imports,
+            parse_failures,
+            ..Summary::default()
+        },
+        workspaces: result::collect_workspaces(context),
+        roots: Vec::new(),
+        nodes,
+        edges,
+        warnings,
+    }
 }
 
 fn build_module_states(modules: &BTreeMap<PathBuf, ModuleFacts>) -> BTreeMap<PathBuf, ModuleState> {

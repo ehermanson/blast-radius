@@ -76,27 +76,7 @@ pub(super) fn build_reverse_links(
                     relation: ConsumerRelation::Import {
                         imported: import.imported.clone(),
                         local: import.local.clone(),
-                        kind: match (&import.imported, import.kind) {
-                            (_, ImportKind::Dynamic) => EdgeKind::ImportsDynamic,
-                            (ImportTarget::Default, ImportKind::CommonJs) => {
-                                EdgeKind::RequiresModule
-                            }
-                            (ImportTarget::Name(_), ImportKind::CommonJs) => {
-                                EdgeKind::RequiresModule
-                            }
-                            (ImportTarget::Namespace, ImportKind::CommonJs) => {
-                                EdgeKind::RequiresModule
-                            }
-                            (ImportTarget::SideEffect, ImportKind::CommonJs) => {
-                                EdgeKind::RequiresModule
-                            }
-                            (ImportTarget::Default, _) => EdgeKind::ImportsDefault,
-                            (ImportTarget::Name(_), _) => EdgeKind::ImportsNamed,
-                            (ImportTarget::Namespace, _) => EdgeKind::ImportsNamespace,
-                            // A side-effect import depends on the whole module,
-                            // like a namespace import.
-                            (ImportTarget::SideEffect, _) => EdgeKind::ImportsNamespace,
-                        },
+                        kind: import_edge_kind(&import.imported, import.kind),
                     },
                 });
 
@@ -146,6 +126,20 @@ pub(super) fn build_reverse_links(
 
     reverse
 }
+/// The edge kind for an import, by what it binds and how it's loaded. Shared by
+/// the reverse-link builder and the whole-repo `graph` dump.
+pub(super) fn import_edge_kind(imported: &ImportTarget, kind: ImportKind) -> EdgeKind {
+    match (imported, kind) {
+        (_, ImportKind::Dynamic) => EdgeKind::ImportsDynamic,
+        (_, ImportKind::CommonJs) => EdgeKind::RequiresModule,
+        (ImportTarget::Default, _) => EdgeKind::ImportsDefault,
+        (ImportTarget::Name(_), _) => EdgeKind::ImportsNamed,
+        (ImportTarget::Namespace, _) => EdgeKind::ImportsNamespace,
+        // A side-effect import depends on the whole module, like a namespace.
+        (ImportTarget::SideEffect, _) => EdgeKind::ImportsNamespace,
+    }
+}
+
 /// Walk the reverse-dependency graph from a set of roots, returning the affected
 /// files (with depth) and the edges that explain each impact.
 pub(super) fn run_bfs(

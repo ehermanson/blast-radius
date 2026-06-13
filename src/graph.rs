@@ -100,14 +100,26 @@ pub enum AnalysisMode {
     Export,
     File,
     Files,
+    /// The whole-repo import graph dump (`graph` command), not an impact query.
+    Graph,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AnalysisTarget {
-    Export { file: PathBuf, export_name: String },
-    File { file: PathBuf },
-    Files { files: Vec<PathBuf> },
+    Export {
+        file: PathBuf,
+        export_name: String,
+    },
+    File {
+        file: PathBuf,
+    },
+    Files {
+        files: Vec<PathBuf>,
+    },
+    /// Whole-repo dump; no single target. `summary`/`risk_tier` are not
+    /// meaningful in this mode — read `nodes`/`edges`.
+    Graph,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -180,7 +192,7 @@ pub struct GraphEdge {
     pub is_ambiguous: bool,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 pub enum EdgeKind {
     ImportsNamed,

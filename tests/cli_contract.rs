@@ -306,6 +306,56 @@ fn long_version_lists_compiled_languages() {
 }
 
 #[test]
+fn graph_command_dumps_full_forward_import_graph() {
+    let repo = setup_repo();
+    let output = blast_radius(repo.path())
+        .args(["--format", "json", "graph"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(json["mode"], "graph");
+    assert_eq!(json["schema_version"].as_u64().unwrap(), 1);
+    // Every source file is a node (source.ts + a.ts + b.ts), all file-kind.
+    let nodes = json["nodes"].as_array().unwrap();
+    assert_eq!(nodes.len(), 3);
+    assert!(nodes.iter().all(|n| n["kind"] == "file"));
+
+    // The whole graph in one shot: a.ts and b.ts both import source.ts. Edges
+    // are depended-upon -> consumer, so source.ts is `from` on both.
+    let id_to_label: std::collections::HashMap<&str, &str> = nodes
+        .iter()
+        .map(|n| (n["id"].as_str().unwrap(), n["label"].as_str().unwrap()))
+        .collect();
+    let forward: Vec<(String, String)> = json["edges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| {
+            (
+                id_to_label[e["to"].as_str().unwrap()].to_string(),
+                id_to_label[e["from"].as_str().unwrap()].to_string(),
+            )
+        })
+        .collect();
+    assert!(forward.contains(&("src/a.ts".to_string(), "src/source.ts".to_string())));
+    assert!(forward.contains(&("src/b.ts".to_string(), "src/source.ts".to_string())));
+}
+
+#[test]
+fn graph_command_tree_format_lists_edges() {
+    let repo = setup_repo();
+    blast_radius(repo.path())
+        .arg("graph")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("src/a.ts -> src/source.ts"));
+}
+
+#[test]
 fn json_output_carries_schema_version() {
     let repo = setup_repo();
     let output = blast_radius(repo.path())

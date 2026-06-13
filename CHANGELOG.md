@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `graph` command: dump the whole-repo import graph (every source file and
+  resolved import/re-export edge) in a single pass. `--format json` for tooling,
+  `mermaid`/`dot` for diagrams, or the default plain `importer -> importee`
+  listing. Useful for visualization and feeding other tools.
+- Accuracy oracle (`scripts/accuracy/`): a differential test of blast-radius's
+  import graph against dependency-cruiser on real fixtures. Baseline run shows
+  zero missed edges on the Chakra UI snapshot (2697 files); see the script's
+  README. Internal quality tooling, not part of the shipped binary.
+
 ## [0.5.0] - 2026-06-13
 
 ### Added

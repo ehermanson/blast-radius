@@ -91,6 +91,10 @@ pub enum Command {
         #[arg(required = true, num_args = 1..)]
         files: Vec<PathBuf>,
     },
+    /// Dump the whole-repo import graph (every file and resolved import edge).
+    /// Useful for visualization or feeding other tools; `--format json` is the
+    /// natural choice, with `mermaid`/`dot` for diagrams.
+    Graph,
     /// Print a shell completion script to stdout.
     Completions {
         #[arg(value_enum)]
