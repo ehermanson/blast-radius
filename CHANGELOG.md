@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-13
+
 ### Changed
 
 - An imported-but-unused symbol now counts as a dependency: a file that imports
@@ -25,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   listing. Useful for visualization and feeding other tools.
 - Accuracy oracle (`scripts/accuracy/`): a differential test of blast-radius's
   import graph against dependency-cruiser on real fixtures, wired into CI as a
-  gate (the `accuracy` job) that fails on any edge the reference resolves but
+  gate (the `accuracy-oracle` job) that fails on any edge the reference resolves but
   blast-radius misses. dependency-cruiser is pinned exactly (`16.10.4`) so the
   gate is deterministic. Internal quality tooling, not part of the shipped
   binary. See the script's README.
