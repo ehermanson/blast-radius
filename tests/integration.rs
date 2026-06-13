@@ -89,6 +89,18 @@ fn depth_of(json: &Value, label: &str) -> Option<u64> {
     })
 }
 
+/// The reported blast radius: file labels at depth >= 1 (the changed file
+/// itself sits at depth 0 and is excluded).
+fn dependent_labels(json: &Value) -> Vec<String> {
+    json["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|node| node["kind"] == "file" && node["depth"].as_u64().unwrap_or(0) >= 1)
+        .filter_map(|node| node["label"].as_str().map(ToOwned::to_owned))
+        .collect()
+}
+
 #[test]
 fn export_mode_reports_transitive_blast_radius() {
     let repo = setup_repo();
@@ -1073,6 +1085,53 @@ fn chakra_ui_example_analyzes_real_world_repo() {
             .iter()
             .any(|label| label.contains("apps/compositions/src/examples/button-basic.tsx"))
     );
+}
+
+/// Validates the *reported blast radius* on a real application (not just the
+/// import graph): changing a core package file must yield a substantial,
+/// correct-looking radius. We don't have an exact ground-truth set, so this
+/// asserts invariants that must always hold plus a hand-verified known
+/// dependent: it reports something substantial (not silently empty), the
+/// changed file is excluded from its own radius, every dependent is downstream
+/// (depth >= 1), and there are no parse failures.
+#[test]
+fn excalidraw_example_reports_real_world_blast_radius() {
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/excalidraw");
+    if !repo.join("package.json").exists() {
+        eprintln!(
+            "skipping excalidraw_example_reports_real_world_blast_radius: examples/excalidraw \
+             not fetched (run scripts/fetch-examples.sh)"
+        );
+        return;
+    }
+
+    let json = run_json(&repo, &["file", "packages/element/src/index.ts"]);
+    assert_eq!(json["summary"]["parse_failures"].as_u64().unwrap(), 0);
+
+    let total = json["summary"]["total_affected_files"].as_u64().unwrap();
+    assert!(
+        total > 50,
+        "a core package file should report a substantial blast radius, got {total}"
+    );
+
+    let dependents = dependent_labels(&json);
+    // Hand-verified: this action module consumes the element package.
+    assert!(
+        dependents
+            .iter()
+            .any(|label| label == "packages/excalidraw/actions/actionAddToLibrary.ts"),
+        "expected a known dependent in the {} reported",
+        dependents.len()
+    );
+    // Invariant: the changed file is never one of its own dependents.
+    assert!(
+        !dependents
+            .iter()
+            .any(|label| label == "packages/element/src/index.ts"),
+        "the changed file must not appear in its own blast radius"
+    );
+    // Invariant: total matches the depth>=1 node count exactly.
+    assert_eq!(total as usize, dependents.len());
 }
 
 #[test]

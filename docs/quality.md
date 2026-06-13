@@ -3,6 +3,8 @@
 These commands are the current baseline for validating `blast-radius` against
 both fixture repos and larger real-world React codebases.
 
+For what runs in CI and what each job's failure means, see [`ci.md`](ci.md).
+
 ## Commands
 
 ```bash
