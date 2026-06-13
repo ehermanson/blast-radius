@@ -99,6 +99,43 @@ test('ambiguous edges on the impacted paths downgrade the verdict to partial', (
   assert.match(md, /confidence: partial — 1 ambiguous edge on these paths/);
 });
 
+test('multiple changed files get a per-file impact breakdown', () => {
+  const md = renderComment({
+    repo_root: '/repo',
+    target: { kind: 'files', files: ['/repo/a.ts', '/repo/b.ts'] },
+    summary: {
+      total_affected_files: 2,
+      directly_affected_files: 2,
+      transitively_affected_files: 0,
+      risk_tier: 'moderate',
+    },
+    workspaces: [],
+    nodes: [
+      { kind: 'file', label: 'src/x.ts', depth: 1 },
+      { kind: 'file', label: 'src/y.ts', depth: 1 },
+    ],
+    roots: [
+      {
+        file: 'a.ts',
+        affected: 2,
+        direct: 2,
+        indirect: 0,
+        files: [
+          { path: 'src/x.ts', depth: 1, endpoint: false },
+          { path: 'src/y.ts', depth: 1, endpoint: true },
+        ],
+      },
+      { file: 'b.ts', affected: 0, direct: 0, indirect: 0, files: [] },
+    ],
+  });
+  assert.match(md, /\*\*What each changed file reaches\*\*/);
+  // Each changed file gets attributed impact...
+  assert.match(md, /`a\.ts` — 2 impacted files \(2 direct, 0 indirect\)/);
+  assert.match(md, /- x\.ts/);
+  // ...including "this change reaches nothing".
+  assert.match(md, /`b\.ts` — no downstream impact/);
+});
+
 test('large radii get a "where it lands" summary and a capped list', () => {
   const nodes = Array.from({ length: 250 }, (_, i) => ({
     kind: 'file',

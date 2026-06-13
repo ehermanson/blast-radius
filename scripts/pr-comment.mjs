@@ -20,6 +20,7 @@ const TIERS = {
 };
 
 const MAX_LISTED = 100;
+const MAX_ROOTS = 20;
 
 // Mirror of the Rust `package_key`: the longest matching workspace root, else
 // the top-level directory.
@@ -59,28 +60,63 @@ export function renderComment(result) {
     `${tier.emoji} **${tier.label}** — ${total} impacted ${plural(total, 'file')} across ` +
       `${packages} ${plural(packages, 'package')} (${direct} direct, ${indirect} indirect)`,
   );
-  lines.push('', changedSection(changed));
 
-  // Group impacted files by directory, busiest first.
+  const roots = (result.roots || []).slice().sort((a, b) => b.affected - a.affected);
+  if (roots.length > 1) {
+    // Multiple changed files: attribute impact to each one (the combined total
+    // in the headline double-counts files reachable from more than one input).
+    lines.push('', '**What each changed file reaches**');
+    for (const root of roots.slice(0, MAX_ROOTS)) {
+      if (!root.affected) {
+        lines.push('', `<details><summary>\`${root.file}\` — no downstream impact</summary>`, '', '_Nothing depends on this file._', '</details>');
+        continue;
+      }
+      const summaryLine =
+        `\`${root.file}\` — ${root.affected} impacted ${plural(root.affected, 'file')} ` +
+        `(${root.direct} direct, ${root.indirect} indirect)`;
+      lines.push('', `<details><summary>${summaryLine}</summary>`, '');
+      lines.push(...impactBody((root.files || []).map((f) => f.path), root.affected));
+      lines.push('</details>');
+    }
+    if (roots.length > MAX_ROOTS) {
+      lines.push('', `_…and ${roots.length - MAX_ROOTS} more changed files._`);
+    }
+  } else {
+    // Single changed file: one merged view.
+    lines.push('', changedSection(changed));
+    lines.push('', `<details><summary>All ${total} impacted files</summary>`, '');
+    lines.push(...impactBody(impacted, total));
+    lines.push('</details>');
+  }
+
+  lines.push('', confidenceNote(result));
+  return finalize(lines);
+}
+
+const finalize = (lines) => lines.filter((l) => l !== null).join('\n').trimEnd() + '\n';
+const dirOf = (label) => (label.includes('/') ? label.slice(0, label.lastIndexOf('/')) : '.');
+const baseOf = (label) => label.slice(label.lastIndexOf('/') + 1);
+
+// The "where it lands" summary (for big radii) plus the directory-grouped,
+// basename list — shared by the single-file and per-changed-file views.
+function impactBody(labels, total) {
   const byDir = new Map();
-  for (const label of impacted) {
+  for (const label of labels) {
     const dir = dirOf(label);
     if (!byDir.has(dir)) byDir.set(dir, []);
     byDir.get(dir).push(label);
   }
   const dirs = [...byDir].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
+  const lines = [];
 
-  // "Where it lands" — a digestible summary for radii too big to scan as a list.
   if (total > 12 && dirs.length > 1) {
-    lines.push('', '**Where it lands**');
+    lines.push('**Where it lands**');
     for (const [dir, files] of dirs.slice(0, 6)) lines.push(`- \`${dir}\` — ${files.length}`);
     const rest = dirs.length - 6;
     if (rest > 0) lines.push(`- _…and ${rest} more ${rest === 1 ? 'directory' : 'directories'}_`);
+    lines.push('');
   }
 
-  // Full list, grouped by directory (basenames), collapsed and capped so a huge
-  // radius can't blow GitHub's comment size limit.
-  lines.push('', `<details><summary>All ${total} impacted files</summary>`, '');
   let listed = 0;
   for (const [dir, files] of dirs) {
     if (listed >= MAX_LISTED) break;
@@ -92,16 +128,9 @@ export function renderComment(result) {
     }
     lines.push('');
   }
-  if (total > listed) lines.push(`_…and ${total - listed} more._`, '');
-  lines.push('</details>');
-
-  lines.push('', confidenceNote(result));
-  return finalize(lines);
+  if (total > listed) lines.push(`_…and ${total - listed} more._`);
+  return lines;
 }
-
-const finalize = (lines) => lines.filter((l) => l !== null).join('\n').trimEnd() + '\n';
-const dirOf = (label) => (label.includes('/') ? label.slice(0, label.lastIndexOf('/')) : '.');
-const baseOf = (label) => label.slice(label.lastIndexOf('/') + 1);
 
 // The files the PR actually changed (the analysis inputs), repo-relative.
 function changedFiles(result) {
