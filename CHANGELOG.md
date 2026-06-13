@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- An imported-but-unused symbol now counts as a dependency: a file that imports
+  `X` from a module is in that module's blast radius even if it never references
+  `X`, because changing or removing `X` would break the (possibly unused)
+  import. Symbol precision is unchanged — importing a *different* symbol still
+  does not match (a `Card` change never reaches a file that imports only
+  `Button` through the same barrel). This makes blast radii slightly more
+  inclusive; a future flag may re-enable usage-based pruning.
+
 ### Added
 
 - `graph` command: dump the whole-repo import graph (every source file and

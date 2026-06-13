@@ -210,6 +210,46 @@ fn export_mode_keeps_default_and_named_imports_separate() {
     assert!(!labels.iter().any(|label| label == "src/named-consumer.ts"));
 }
 
+/// Importing a symbol is a dependency on it even when the binding is never
+/// referenced: removing/renaming the export would break the (unused) import. So
+/// a consumer that imports a symbol but does not use it is still in that
+/// symbol's blast radius — but symbol precision holds: importing a *different*
+/// symbol is not.
+#[test]
+fn unused_import_is_still_in_the_blast_radius() {
+    let repo = tempdir().unwrap();
+    fs::create_dir_all(repo.path().join("src")).unwrap();
+    fs::write(repo.path().join("package.json"), r#"{"name":"unused"}"#).unwrap();
+    fs::write(
+        repo.path().join("src/dep.ts"),
+        "export const used = 1;\nexport const other = 2;\n",
+    )
+    .unwrap();
+    // Imports `used` but never references it — still a dependency on `used`.
+    fs::write(
+        repo.path().join("src/dead-import.ts"),
+        "import { used } from './dep';\nexport const hello = 'hi';\n",
+    )
+    .unwrap();
+    // Imports only `other`, so a change scoped to `used` must not reach it.
+    fs::write(
+        repo.path().join("src/other-consumer.ts"),
+        "import { other } from './dep';\nexport const w = other;\n",
+    )
+    .unwrap();
+
+    let used = run_json(repo.path(), &["export", "src/dep.ts", "used"]);
+    let labels = node_labels(&used);
+    assert!(
+        labels.iter().any(|label| label == "src/dead-import.ts"),
+        "an imported-but-unused symbol is still a dependency; got {labels:?}"
+    );
+    assert!(
+        !labels.iter().any(|label| label == "src/other-consumer.ts"),
+        "importing a different symbol must not match; got {labels:?}"
+    );
+}
+
 /// The core symbol-aware promise, end to end on the reported blast radius:
 /// changing `Card.tsx` reaches its real consumers but NOT files that import
 /// through the same `index.ts` barrel while using only `Button`. A file-level

@@ -196,7 +196,11 @@ pub(super) fn run_bfs(
                     local,
                     kind,
                 } => {
-                    if import_matches(imported, &current_exports, consumer_module, local) {
+                    // Importing a symbol is a dependency on it whether or not the
+                    // binding is referenced — changing/removing the symbol breaks
+                    // even an unused import. Gating is by which symbol is imported
+                    // (precision), not by usage.
+                    if import_target_matches(imported, &current_exports, consumer_module, local) {
                         file_affected = true;
                         edge_kind = Some(if is_jsx_usage(consumer_module, local) {
                             EdgeKind::UsesJsxComponent
@@ -397,30 +401,6 @@ pub(super) fn compute_root_impacts(
     impacts.sort_by(|a, b| b.affected.cmp(&a.affected).then(a.file.cmp(&b.file)));
     impacts
 }
-fn import_matches(
-    imported: &ImportTarget,
-    current_exports: &BTreeSet<String>,
-    module: &ModuleFacts,
-    local: &str,
-) -> bool {
-    // A side-effect import binds nothing, so there is no local usage to gate
-    // on: reaching the file is the impact.
-    if matches!(imported, ImportTarget::SideEffect) {
-        return true;
-    }
-    import_target_matches(imported, current_exports, module, local)
-        && (module.used_locals.contains(local)
-            || module
-                .namespace_member_usage
-                .get(local)
-                .map(|members| {
-                    members
-                        .iter()
-                        .any(|member| current_exports.contains(member))
-                })
-                .unwrap_or(false))
-}
-
 fn import_target_matches(
     imported: &ImportTarget,
     current_exports: &BTreeSet<String>,
@@ -463,7 +443,10 @@ fn import_target_matches(
                         || !member_entries(current_exports, member).is_empty()
                 })
             })
-            .unwrap_or_else(|| module.used_locals.contains(local) && !current_exports.is_empty()),
+            // No member access tracked: the consumer holds the whole namespace
+            // (used as a value, or imported and unused), so it depends on the
+            // module as a whole — any affected export matches.
+            .unwrap_or(!current_exports.is_empty()),
     }
 }
 
