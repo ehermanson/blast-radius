@@ -14,8 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `mermaid`/`dot` for diagrams, or the default plain `importer -> importee`
   listing. Useful for visualization and feeding other tools.
 - Accuracy oracle (`scripts/accuracy/`): a differential test of blast-radius's
-  import graph against dependency-cruiser on real fixtures. Internal quality
-  tooling, not part of the shipped binary. See the script's README.
+  import graph against dependency-cruiser on real fixtures, wired into CI as a
+  gate (the `accuracy` job) that fails on any edge the reference resolves but
+  blast-radius misses. dependency-cruiser is pinned exactly (`16.10.4`) so the
+  gate is deterministic. Internal quality tooling, not part of the shipped
+  binary. See the script's README.
 - Accuracy corpus now spans both repo shapes: the existing Chakra UI snapshot
   (library) plus an Excalidraw snapshot (a real React **application** —
   route/lazy code-splitting, dynamic imports). Baseline: zero missed edges on

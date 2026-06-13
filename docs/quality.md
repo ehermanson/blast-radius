@@ -88,9 +88,15 @@ make quality-components
 - runtime on optional language fixtures when their features are enabled
 - `target/quality/metrics.json` drift over time
 
-The current suite improves crash-resilience and parser coverage, but it is not
-yet a proof of semantic correctness. Additional corpus-based accuracy checks are
-still needed.
+## Accuracy oracle
+
+Beyond the hand-built suite, the `accuracy` CI job differential-tests
+blast-radius's import graph against dependency-cruiser (a mature independent
+resolver) on real fixtures — the Chakra UI snapshot (a library) and the
+Excalidraw snapshot (a real application) — and fails on any edge the reference
+resolves that blast-radius misses. This is the corpus-based correctness check
+the hand-built fixtures can't provide. See `scripts/accuracy/README.md`. Run it
+locally with `node scripts/accuracy/oracle.mjs <fixture> --strict`.
 
 ## Current Baseline
 

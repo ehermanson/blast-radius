@@ -149,3 +149,40 @@ jobs:
 
       - name: Stress test component demo
         run: cargo run --features vue,svelte --bin blast-radius -- --repo-root examples/component-demo file src/shared.ts > /dev/null
+
+  # Differential accuracy gate: blast-radius's import graph must not MISS any
+  # edge a mature independent resolver (dependency-cruiser) finds. `--strict`
+  # exits non-zero on reference-only edges (false negatives); blast-radius
+  # finding *more* edges is fine. See scripts/accuracy/README.md.
+  accuracy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+
+      - name: Build blast-radius
+        run: cargo build
+
+      - name: Fetch example snapshots
+        run: ./scripts/fetch-examples.sh
+
+      # Fast committed fixtures first (no network fetch needed).
+      - name: Oracle — committed fixtures
+        run: |
+          node scripts/accuracy/oracle.mjs tests/fixtures/monorepo --strict
+          node scripts/accuracy/oracle.mjs examples/vite-react-ts --strict
+
+      # Large real-world snapshots: a component library and a real application.
+      - name: Oracle — Chakra UI (library)
+        run: node scripts/accuracy/oracle.mjs examples/chakra-ui --strict
+
+      - name: Oracle — Excalidraw (application)
+        run: node scripts/accuracy/oracle.mjs examples/excalidraw --strict

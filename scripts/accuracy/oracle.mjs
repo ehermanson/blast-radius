@@ -19,7 +19,9 @@ import { fileURLToPath } from 'node:url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..', '..');
 const DC_CONFIG = path.join(HERE, '.dependency-cruiser.cjs');
-const DC_VERSION = 'dependency-cruiser@16';
+// Pinned exactly so the gate is deterministic — a depcruise patch must not be
+// able to flip the result. Bump deliberately.
+const DC_VERSION = 'dependency-cruiser@16.10.4';
 const SOURCE_EXTS = new Set([
   '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts',
 ]);
