@@ -46,7 +46,14 @@ importer → importee.
 | --- | --- | --- | --- |
 | `tests/fixtures/monorepo` | 7 | 0 | 1 workspace edge only blast-radius resolves |
 | `examples/vite-react-ts` | 4 | 0 | exact match |
-| `examples/chakra-ui` | 2697 | 0 | every divergence is blast-radius finding more true edges |
+| `examples/chakra-ui` (library) | 2697 | 0 | every divergence is blast-radius finding more true edges |
+| `examples/excalidraw` (app) | 631 | 2 | both are `vi.mock(...)` calls in a test-setup file (test-runner mock magic, not modeled) |
+
+The corpus deliberately spans both shapes: Chakra UI is library-shaped (barrels,
+re-exports, package-internal edges); Excalidraw is a real application (route/lazy
+code-splitting, dynamic imports, app→feature→shared layering). The only
+Excalidraw misses are `vi.mock("…")` module references, which blast-radius does
+not currently model.
 
 dependency-cruiser is pinned (`dependency-cruiser@16`) and fetched on demand via
 `npx`, so there is no committed Node dependency footprint.

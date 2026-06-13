@@ -41,7 +41,10 @@ function parseArgs(argv) {
     process.exit(64);
   }
   args.fixture = path.resolve(args.fixture);
-  if (!args.tsconfig) {
+  // dependency-cruiser runs with cwd = fixture, so the tsconfig must be an
+  // absolute path regardless of where the oracle was invoked from.
+  if (args.tsconfig) args.tsconfig = path.resolve(args.tsconfig);
+  else {
     const candidate = path.join(args.fixture, 'tsconfig.json');
     if (existsSync(candidate)) args.tsconfig = candidate;
   }
@@ -76,11 +79,15 @@ function blastRadiusEdges(fixture) {
     { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 },
   );
   const data = JSON.parse(stdout);
-  const idToFile = new Map(data.nodes.map((n) => [n.id, rel(fixture, n.file)]));
+  // Use the node `label` (already repo-relative, `/`-normalized) rather than
+  // relativizing the absolute `file` ourselves: blast-radius canonicalizes the
+  // repo root (resolving symlinks like macOS /tmp -> /private/tmp), so deriving
+  // paths from `file` against an un-canonicalized fixture path would diverge.
+  const idToLabel = new Map(data.nodes.map((n) => [n.id, n.label]));
   const edges = new Set();
   for (const e of data.edges) {
-    const dependedUpon = idToFile.get(e.from);
-    const consumer = idToFile.get(e.to);
+    const dependedUpon = idToLabel.get(e.from);
+    const consumer = idToLabel.get(e.to);
     if (!dependedUpon || !consumer || dependedUpon === consumer) continue;
     edges.add(edgeKey(consumer, dependedUpon)); // forward: consumer imports depended-upon
   }

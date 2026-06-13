@@ -263,14 +263,15 @@ The `examples/` directory has runnable fixtures for each supported language:
 | --------------------------- | ------------------------------------------------------------ |
 | `monorepo-demo`             | Aliases, barrels, CommonJS, transitive React usage           |
 | `vite-react-ts`             | A real Vite React + TypeScript template                      |
-| `chakra-ui` †               | Chakra UI snapshot for large-repo stress testing             |
+| `chakra-ui` †               | Chakra UI snapshot — large library-shaped React monorepo     |
+| `excalidraw` †              | Excalidraw snapshot — large real-world React **application**  |
 | `python-demo` / `fastapi` † | Python package, relative, and `__init__.py` reexport imports |
 | `rust-demo`                 | `mod`, `pub use`, `crate::` / `self::` imports               |
 | `component-demo`            | Mixed Vue/Svelte component imports                           |
 
-† `chakra-ui` and `fastapi` are large real-world snapshots that aren't committed
-to the repo. Fetch them on demand (pinned to a known upstream commit) before
-running their examples:
+† `chakra-ui`, `excalidraw`, and `fastapi` are large real-world snapshots that
+aren't committed to the repo. Fetch them on demand (pinned to a known upstream
+commit) before running their examples:
 
 ```bash
 scripts/fetch-examples.sh
@@ -284,6 +285,9 @@ cargo run --bin blast-radius -- --repo-root examples/monorepo-demo file apps/sto
 
 # Large React monorepo, with the full cascade tree
 cargo run --bin blast-radius -- --repo-root examples/chakra-ui -v file packages/react/src/components/button/button.tsx
+
+# Large real-world React app (Excalidraw)
+cargo run --bin blast-radius -- --repo-root examples/excalidraw file packages/element/src/index.ts
 
 # Python (needs the feature compiled in)
 cargo run --features python --bin blast-radius -- --repo-root examples/fastapi file fastapi/applications.py

@@ -14,9 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `mermaid`/`dot` for diagrams, or the default plain `importer -> importee`
   listing. Useful for visualization and feeding other tools.
 - Accuracy oracle (`scripts/accuracy/`): a differential test of blast-radius's
-  import graph against dependency-cruiser on real fixtures. Baseline run shows
-  zero missed edges on the Chakra UI snapshot (2697 files); see the script's
-  README. Internal quality tooling, not part of the shipped binary.
+  import graph against dependency-cruiser on real fixtures. Internal quality
+  tooling, not part of the shipped binary. See the script's README.
+- Accuracy corpus now spans both repo shapes: the existing Chakra UI snapshot
+  (library) plus an Excalidraw snapshot (a real React **application** —
+  route/lazy code-splitting, dynamic imports). Baseline: zero missed edges on
+  Chakra UI (2697 files); on Excalidraw the only two are `vi.mock()` calls in a
+  test-setup file (test-runner mock magic, not modeled).
 
 ## [0.5.0] - 2026-06-13
 

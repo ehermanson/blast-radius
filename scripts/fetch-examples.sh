@@ -63,4 +63,9 @@ fetch_one "fastapi" \
   "5cdf820c8046edaf83c306ebd7435f038fc4a75a" \
   "pyproject.toml"
 
+fetch_one "excalidraw" \
+  "https://github.com/excalidraw/excalidraw" \
+  "a83ac488536dbf4bc4dcf1f472f72ce3b4bd2073" \
+  "package.json"
+
 echo "Done."
