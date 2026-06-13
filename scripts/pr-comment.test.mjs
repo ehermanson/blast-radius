@@ -65,12 +65,28 @@ test('zero impact renders a clear no-impact message, not an empty list', () => {
   assert.ok(!md.includes('<details>'));
 });
 
-test('confidence note surfaces analyzer caveats', () => {
+test('unresolved imports / parse failures are caveats, not a "partial" verdict', () => {
+  // Matches the CLI: repo-wide blind spots stay "high" with an appended caveat;
+  // only on-path ambiguity downgrades the verdict.
   const md = renderComment({
     ...impactResult,
-    summary: { ...impactResult.summary, unresolved_imports: 3, parse_failures: 1 },
+    summary: { ...impactResult.summary, unresolved_imports: 187, parse_failures: 1 },
   });
-  assert.match(md, /confidence: partial — 3 unresolved imports, 1 parse failures/);
+  assert.match(md, /confidence: high/);
+  assert.match(md, /187 unresolved imports repo-wide may hide consumers/);
+  assert.match(md, /1 parse failures may hide consumers/);
+  assert.ok(!md.includes('partial'));
+});
+
+test('ambiguous edges on the impacted paths downgrade the verdict to partial', () => {
+  const md = renderComment({
+    ...impactResult,
+    edges: [
+      { from: 'a', to: 'b', kind: 'reexports_star', is_ambiguous: true },
+      { from: 'b', to: 'c', kind: 'imports_named', is_ambiguous: false },
+    ],
+  });
+  assert.match(md, /confidence: partial — 1 ambiguous edge on these paths/);
 });
 
 test('caps very large impacted lists so the comment cannot overflow', () => {

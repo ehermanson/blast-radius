@@ -49,7 +49,7 @@ export function renderComment(result) {
   if (total === 0) {
     lines.push(`${tier.emoji} **No downstream files impacted** by the changed files.`);
     if (changedNote) lines.push('', changedNote);
-    lines.push('', confidenceNote(summary));
+    lines.push('', confidenceNote(result));
     return lines.filter((l) => l !== null).join('\n').trimEnd() + '\n';
   }
 
@@ -90,18 +90,34 @@ export function renderComment(result) {
   if (total > listed) lines.push(`_…and ${total - listed} more._`, '');
   lines.push('</details>');
 
-  lines.push('', confidenceNote(summary));
+  lines.push('', confidenceNote(result));
   return lines.filter((l) => l !== null).join('\n').trimEnd() + '\n';
 }
 
-function confidenceNote(summary) {
+// Mirrors the CLI footer: the high/partial verdict is driven ONLY by ambiguity
+// on the impacted paths (the traced edges) — not by repo-wide blind spots.
+// Unresolved imports and parse failures are appended as separate "may hide
+// consumers" caveats, exactly as the tool reports them, so the comment never
+// disagrees with `blast-radius`'s own confidence line.
+function confidenceNote(result) {
+  const summary = result.summary || {};
+  const total = summary.total_affected_files || 0;
+  const onPathAmbiguous = (result.edges || []).filter((e) => e.is_ambiguous).length;
+
+  let note =
+    total === 0 || onPathAmbiguous === 0
+      ? 'confidence: high'
+      : `confidence: partial — ${onPathAmbiguous} ambiguous ${plural(onPathAmbiguous, 'edge')} on these paths`;
+
   const caveats = [];
-  if (summary.unresolved_imports) caveats.push(`${summary.unresolved_imports} unresolved imports`);
-  if (summary.ambiguous_edges) caveats.push(`${summary.ambiguous_edges} ambiguous edges`);
-  if (summary.parse_failures) caveats.push(`${summary.parse_failures} parse failures`);
-  if (summary.skipped_inputs) caveats.push(`${summary.skipped_inputs} inputs skipped`);
-  const confidence = caveats.length ? `partial — ${caveats.join(', ')}` : 'high';
-  return `<sub>confidence: ${confidence}</sub>`;
+  if (total > 0 && summary.unresolved_imports) {
+    caveats.push(`${summary.unresolved_imports} unresolved imports repo-wide may hide consumers`);
+  }
+  if (summary.parse_failures) {
+    caveats.push(`${summary.parse_failures} parse failures may hide consumers`);
+  }
+  if (caveats.length) note += ` · ${caveats.join(' · ')}`;
+  return `<sub>${note}</sub>`;
 }
 
 const plural = (n, word) => (n === 1 ? word : `${word}s`);
