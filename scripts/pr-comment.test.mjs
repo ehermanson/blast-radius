@@ -87,6 +87,10 @@ test('unresolved imports / parse failures are caveats, not a "partial" verdict',
   assert.ok(!md.includes('partial'));
 });
 
+test('footer links back to the project', () => {
+  assert.match(renderComment(impactResult), /<a href="https:\/\/github\.com\/ehermanson\/blast-radius">blast-radius<\/a>/);
+});
+
 test('ambiguous edges on the impacted paths downgrade the verdict to partial', () => {
   const md = renderComment({
     ...impactResult,

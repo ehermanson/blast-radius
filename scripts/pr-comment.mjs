@@ -12,6 +12,8 @@
 // Stable marker so the action can find and update its own comment in place.
 export const MARKER = '<!-- blast-radius -->';
 
+const REPO_URL = 'https://github.com/ehermanson/blast-radius';
+
 const TIERS = {
   minor: { label: 'Minor', emoji: '🟢' },
   moderate: { label: 'Moderate', emoji: '🟡' },
@@ -152,7 +154,7 @@ function confidenceNote(result) {
     caveats.push(`${summary.parse_failures} parse failures may hide consumers`);
   }
   if (caveats.length) note += ` · ${caveats.join(' · ')}`;
-  return `<sub>${note}</sub>`;
+  return `<sub>${note} · <a href="${REPO_URL}">blast-radius</a></sub>`;
 }
 
 const plural = (n, word) => (n === 1 ? word : `${word}s`);
