@@ -37,34 +37,21 @@ export function renderComment(result) {
   const summary = result.summary || {};
   const total = summary.total_affected_files || 0;
   const tier = TIERS[summary.risk_tier] || { label: summary.risk_tier || 'unknown', emoji: '•' };
-
-  const changed = (result.roots || []).map((r) => r.file);
-  const changedNote = changed.length
-    ? `Changed: ${changed.slice(0, 10).map((f) => `\`${f}\``).join(', ')}` +
-      (changed.length > 10 ? ` _(+${changed.length - 10} more)_` : '')
-    : '';
+  const changed = changedFiles(result);
 
   const lines = [MARKER, '## 🧨 blast-radius', ''];
 
   if (total === 0) {
     lines.push(`${tier.emoji} **No downstream files impacted** by the changed files.`);
-    if (changedNote) lines.push('', changedNote);
+    lines.push('', changedSection(changed));
     lines.push('', confidenceNote(result));
-    return lines.filter((l) => l !== null).join('\n').trimEnd() + '\n';
+    return finalize(lines);
   }
 
-  // Combined impacted set: file nodes at depth >= 1, grouped by package.
   const impacted = (result.nodes || [])
     .filter((n) => n.kind === 'file' && (n.depth || 0) >= 1)
-    .map((n) => n.label)
-    .sort();
-  const byPackage = new Map();
-  for (const label of impacted) {
-    const key = packageKey(label, result.workspaces || []);
-    if (!byPackage.has(key)) byPackage.set(key, []);
-    byPackage.get(key).push(label);
-  }
-  const packages = byPackage.size;
+    .map((n) => n.label);
+  const packages = new Set(impacted.map((l) => packageKey(l, result.workspaces || []))).size;
   const direct = summary.directly_affected_files || 0;
   const indirect = summary.transitively_affected_files || 0;
 
@@ -72,17 +59,35 @@ export function renderComment(result) {
     `${tier.emoji} **${tier.label}** — ${total} impacted ${plural(total, 'file')} across ` +
       `${packages} ${plural(packages, 'package')} (${direct} direct, ${indirect} indirect)`,
   );
-  if (changedNote) lines.push('', changedNote);
+  lines.push('', changedSection(changed));
 
-  // Collapsible, grouped, capped so a huge radius can't blow the comment limit.
-  lines.push('', `<details><summary>Impacted files (${total})</summary>`, '');
+  // Group impacted files by directory, busiest first.
+  const byDir = new Map();
+  for (const label of impacted) {
+    const dir = dirOf(label);
+    if (!byDir.has(dir)) byDir.set(dir, []);
+    byDir.get(dir).push(label);
+  }
+  const dirs = [...byDir].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
+
+  // "Where it lands" — a digestible summary for radii too big to scan as a list.
+  if (total > 12 && dirs.length > 1) {
+    lines.push('', '**Where it lands**');
+    for (const [dir, files] of dirs.slice(0, 6)) lines.push(`- \`${dir}\` — ${files.length}`);
+    const rest = dirs.length - 6;
+    if (rest > 0) lines.push(`- _…and ${rest} more ${rest === 1 ? 'directory' : 'directories'}_`);
+  }
+
+  // Full list, grouped by directory (basenames), collapsed and capped so a huge
+  // radius can't blow GitHub's comment size limit.
+  lines.push('', `<details><summary>All ${total} impacted files</summary>`, '');
   let listed = 0;
-  for (const [pkg, files] of [...byPackage].sort((a, b) => b[1].length - a[1].length)) {
+  for (const [dir, files] of dirs) {
     if (listed >= MAX_LISTED) break;
-    lines.push(`**${pkg}** (${files.length})`, '');
-    for (const file of files) {
+    lines.push(`**\`${dir}\`** (${files.length})`, '');
+    for (const file of files.sort()) {
       if (listed >= MAX_LISTED) break;
-      lines.push(`- \`${file}\``);
+      lines.push(`- ${baseOf(file)}`);
       listed++;
     }
     lines.push('');
@@ -91,7 +96,30 @@ export function renderComment(result) {
   lines.push('</details>');
 
   lines.push('', confidenceNote(result));
-  return lines.filter((l) => l !== null).join('\n').trimEnd() + '\n';
+  return finalize(lines);
+}
+
+const finalize = (lines) => lines.filter((l) => l !== null).join('\n').trimEnd() + '\n';
+const dirOf = (label) => (label.includes('/') ? label.slice(0, label.lastIndexOf('/')) : '.');
+const baseOf = (label) => label.slice(label.lastIndexOf('/') + 1);
+
+// The files the PR actually changed (the analysis inputs), repo-relative.
+function changedFiles(result) {
+  const root = (result.repo_root || '').split('\\').join('/');
+  const target = result.target || {};
+  const raw = target.kind === 'file' ? [target.file] : target.files || [];
+  return raw.filter(Boolean).map((f) => {
+    const s = f.split('\\').join('/');
+    return root && s.startsWith(`${root}/`) ? s.slice(root.length + 1) : s;
+  });
+}
+
+function changedSection(changed) {
+  if (changed.length === 0) return null;
+  if (changed.length === 1) return `**Changed:** \`${changed[0]}\``;
+  const shown = changed.slice(0, 15).map((f) => `- \`${f}\``);
+  if (changed.length > 15) shown.push(`- _…and ${changed.length - 15} more_`);
+  return [`**Changed (${changed.length}):**`, '', ...shown].join('\n');
 }
 
 // Mirrors the CLI footer: the high/partial verdict is driven ONLY by ambiguity

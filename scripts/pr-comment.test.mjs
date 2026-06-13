@@ -6,6 +6,8 @@ import assert from 'node:assert/strict';
 import { renderComment, MARKER } from './pr-comment.mjs';
 
 const impactResult = {
+  repo_root: '/repo',
+  target: { kind: 'files', files: ['/repo/packages/ui/src/Button.tsx'] },
   summary: {
     directly_affected_files: 4,
     transitively_affected_files: 1,
@@ -20,7 +22,7 @@ const impactResult = {
     { name: '@acme/ui', root: 'packages/ui' },
     { name: '@acme/storefront', root: 'apps/storefront' },
   ],
-  roots: [{ file: 'packages/ui/src/Button.tsx' }],
+  roots: [],
   nodes: [
     { kind: 'file', label: 'packages/ui/src/Button.tsx', depth: 0 },
     { kind: 'file', label: 'packages/ui/src/Card.tsx', depth: 1 },
@@ -36,6 +38,10 @@ test('includes the sticky marker so the action can update in place', () => {
   assert.ok(renderComment(impactResult).startsWith(MARKER));
 });
 
+test('shows the changed file(s) that were touched, repo-relative', () => {
+  assert.match(renderComment(impactResult), /\*\*Changed:\*\* `packages\/ui\/src\/Button\.tsx`/);
+});
+
 test('headline reports tier, totals, and package count', () => {
   const md = renderComment(impactResult);
   assert.match(md, /\*\*Moderate\*\*/);
@@ -43,25 +49,29 @@ test('headline reports tier, totals, and package count', () => {
   assert.match(md, /4 direct, 1 indirect/);
 });
 
-test('lists only downstream file nodes (depth >= 1), grouped by package', () => {
+test('lists impacted files grouped by directory, as basenames, excluding the changed file', () => {
   const md = renderComment(impactResult);
-  // apps/storefront has 3 impacted (App, PromoCard, LegacyButtonCard); ui has 2.
-  assert.match(md, /\*\*apps\/storefront\*\* \(3\)/);
-  assert.match(md, /\*\*packages\/ui\*\* \(2\)/);
-  assert.match(md, /- `apps\/storefront\/src\/App\.tsx`/);
-  // The changed root (depth 0) and export-kind nodes are not listed as impacted.
-  assert.ok(!md.includes('- `packages/ui/src/Button.tsx`'));
+  // apps/storefront/src has 3 impacted (App, PromoCard, LegacyButtonCard).
+  assert.match(md, /\*\*`apps\/storefront\/src`\*\* \(3\)/);
+  assert.match(md, /- App\.tsx/);
+  // The list uses basenames, not full paths.
+  assert.ok(!md.includes('- apps/storefront/src/App.tsx'));
+  // The changed root and export-kind nodes are not listed as impacted.
+  assert.ok(!md.includes('- Button.tsx'));
   assert.ok(!md.includes('#Button'));
 });
 
-test('zero impact renders a clear no-impact message, not an empty list', () => {
+test('zero impact renders a clear message and still shows what changed', () => {
   const md = renderComment({
+    repo_root: '/repo',
+    target: { kind: 'files', files: ['/repo/apps/storefront/src/App.tsx'] },
     summary: { total_affected_files: 0, risk_tier: 'minor' },
-    roots: [{ file: 'apps/storefront/src/App.tsx' }],
+    roots: [],
     nodes: [],
     workspaces: [],
   });
   assert.match(md, /No downstream files impacted/);
+  assert.match(md, /\*\*Changed:\*\* `apps\/storefront\/src\/App\.tsx`/);
   assert.ok(!md.includes('<details>'));
 });
 
@@ -89,18 +99,27 @@ test('ambiguous edges on the impacted paths downgrade the verdict to partial', (
   assert.match(md, /confidence: partial — 1 ambiguous edge on these paths/);
 });
 
-test('caps very large impacted lists so the comment cannot overflow', () => {
+test('large radii get a "where it lands" summary and a capped list', () => {
   const nodes = Array.from({ length: 250 }, (_, i) => ({
     kind: 'file',
-    label: `src/file-${i}.ts`,
+    label: `src/dir-${i % 10}/file-${i}.ts`,
     depth: 1,
   }));
   const md = renderComment({
-    summary: { total_affected_files: 250, directly_affected_files: 250, transitively_affected_files: 0, risk_tier: 'high' },
-    roots: [{ file: 'src/hub.ts' }],
+    repo_root: '/repo',
+    target: { kind: 'files', files: ['/repo/src/hub.ts'] },
+    summary: {
+      total_affected_files: 250,
+      directly_affected_files: 250,
+      transitively_affected_files: 0,
+      risk_tier: 'high',
+    },
+    roots: [],
     nodes,
     workspaces: [],
   });
+  assert.match(md, /\*\*Where it lands\*\*/);
+  assert.match(md, /…and 4 more directories/);
   assert.match(md, /…and \d+ more\./);
   assert.ok(md.length < 65000, 'comment must stay under the GitHub comment limit');
 });
