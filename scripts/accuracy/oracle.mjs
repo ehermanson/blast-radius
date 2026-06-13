@@ -100,58 +100,60 @@ function blastRadiusEdges(fixture) {
 // skips .tsx roots). Returns resolved internal edges plus the specifiers it
 // could not resolve, so we can tell "blast-radius found an edge the reference
 // missed because the reference couldn't resolve it" apart from a real extra.
-function referenceEdges(fixture, files, tsconfig) {
+// dependency-cruiser is invoked in chunks of files rather than all at once:
+// a single call over thousands of file arguments exits non-zero with no output
+// on CI (resource/arg-list limits not hit on dev machines). Resolution is
+// per-file and targets are looked up on disk, so an edge from a file in one
+// chunk to a file in another still resolves — the merged edge set is identical
+// to a single call. Smaller chunks also localize any depcruise failure.
+const DC_CHUNK = 400;
+
+function runDepcruise(fixture, chunk, tsconfig) {
   const args = ['--yes', DC_VERSION, '--config', DC_CONFIG, '--output-type', 'json'];
-  for (const f of files) args.push(rel(fixture, f));
-  let stdout;
+  for (const f of chunk) args.push(rel(fixture, f));
   try {
-    stdout = execFileSync('npx', args, {
-      cwd: fixture,
-      encoding: 'utf8',
-      maxBuffer: 256 * 1024 * 1024,
-      // Give the child a generous heap; the reference graph for a large repo
-      // can be memory-heavy and CI runners default node's old-space low.
-      env: {
-        ...process.env,
-        BR_TSCONFIG: tsconfig || '',
-        NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --max-old-space-size=6144`.trim(),
-      },
-    });
+    return JSON.parse(
+      execFileSync('npx', args, {
+        cwd: fixture,
+        encoding: 'utf8',
+        maxBuffer: 256 * 1024 * 1024,
+        env: { ...process.env, BR_TSCONFIG: tsconfig || '' },
+      }),
+    );
   } catch (error) {
-    // dependency-cruiser exits non-zero when it counts rule violations; with no
-    // rules that shouldn't happen, but be robust: if it still emitted the graph
-    // JSON on stdout, use it. Otherwise surface everything (swallowing it turns
-    // every failure into an opaque "Command failed").
     const out = (error.stdout || '').toString();
-    if (out.trimStart().startsWith('{')) {
-      stdout = out;
-    } else {
-      const stderr = (error.stderr || '').toString();
-      throw new Error(
-        `dependency-cruiser failed (status=${error.status} signal=${error.signal} ` +
-          `code=${error.code}).\n--- stderr (last 3000) ---\n${stderr.slice(-3000)}\n` +
-          `--- stdout (last 1500) ---\n${out.slice(-1500)}`,
-      );
-    }
+    if (out.trimStart().startsWith('{')) return JSON.parse(out);
+    const stderr = (error.stderr || '').toString();
+    throw new Error(
+      `dependency-cruiser failed on a ${chunk.length}-file chunk ` +
+        `(status=${error.status} signal=${error.signal} code=${error.code}).\n` +
+        `--- stderr (last 3000) ---\n${stderr.slice(-3000)}\n` +
+        `--- stdout (last 1500) ---\n${out.slice(-1500)}`,
+    );
   }
-  const data = JSON.parse(stdout);
+}
+
+function referenceEdges(fixture, files, tsconfig) {
   const edges = new Set();
   const unresolved = []; // { from, module }
-  for (const m of data.modules) {
-    const from = m.source;
-    for (const dep of m.dependencies || []) {
-      if (dep.couldNotResolve) {
-        unresolved.push({ from, module: dep.module });
-        continue;
+  for (let i = 0; i < files.length; i += DC_CHUNK) {
+    const data = runDepcruise(fixture, files.slice(i, i + DC_CHUNK), tsconfig);
+    for (const m of data.modules) {
+      const from = m.source;
+      for (const dep of m.dependencies || []) {
+        if (dep.couldNotResolve) {
+          unresolved.push({ from, module: dep.module });
+          continue;
+        }
+        const to = dep.resolved;
+        if (!to || to.startsWith('node_modules/') || to.includes('/node_modules/')) continue;
+        // blast-radius scopes out non-code imports (CSS, images, .json, fonts)
+        // as assets by design, so exclude them for an apples-to-apples code
+        // comparison.
+        if (!SOURCE_EXTS.has(path.extname(to))) continue;
+        if (from === to) continue;
+        edges.add(edgeKey(from, to));
       }
-      const to = dep.resolved;
-      if (!to || to.startsWith('node_modules/') || to.includes('/node_modules/')) continue;
-      // blast-radius scopes out non-code imports (CSS, images, .json, fonts) as
-      // assets by design, so exclude them from the reference for an apples-to-
-      // apples code-dependency comparison.
-      if (!SOURCE_EXTS.has(path.extname(to))) continue;
-      if (from === to) continue;
-      edges.add(edgeKey(from, to));
     }
   }
   return { edges, unresolved };
