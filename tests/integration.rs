@@ -82,6 +82,13 @@ fn label_count(labels: &[String], expected: &str) -> usize {
         .count()
 }
 
+/// Hops from the changed file for a given file node in the blast radius.
+fn depth_of(json: &Value, label: &str) -> Option<u64> {
+    json["nodes"].as_array().unwrap().iter().find_map(|node| {
+        (node["label"] == label && node["kind"] == "file").then(|| node["depth"].as_u64())?
+    })
+}
+
 #[test]
 fn export_mode_reports_transitive_blast_radius() {
     let repo = setup_repo();
@@ -201,6 +208,143 @@ fn export_mode_keeps_default_and_named_imports_separate() {
             .any(|label| label == "src/default-consumer.ts")
     );
     assert!(!labels.iter().any(|label| label == "src/named-consumer.ts"));
+}
+
+/// The core symbol-aware promise, end to end on the reported blast radius:
+/// changing `Card.tsx` reaches its real consumers but NOT files that import
+/// through the same `index.ts` barrel while using only `Button`. A file-level
+/// reachability tool would wrongly report every barrel consumer; blast-radius
+/// must prune by which symbol actually flows. Depths are asserted so the
+/// transitive chain (Card -> index -> PromoCard -> App) is exactly right.
+#[test]
+fn file_mode_prunes_barrel_consumers_that_use_other_symbols() {
+    let repo = fixture_root();
+    let json = run_json(&repo, &["file", "packages/ui/src/Card.tsx"]);
+    let labels = node_labels(&json);
+
+    // index.ts re-exports Card (`export * from "./Card"`); PromoCard uses Card;
+    // App uses PromoCard. Exact depths prove the traversal, not just presence.
+    assert_eq!(depth_of(&json, "packages/ui/src/index.ts"), Some(1));
+    assert_eq!(
+        depth_of(&json, "apps/storefront/src/PromoCard.tsx"),
+        Some(2)
+    );
+    assert_eq!(depth_of(&json, "apps/storefront/src/App.tsx"), Some(3));
+
+    // Button-only consumers reached through the SAME barrel must be pruned.
+    for excluded in [
+        "packages/ui/src/Toolbar.tsx",
+        "packages/ui/src/Button.tsx",
+        "apps/storefront/src/LegacyButtonCard.jsx",
+    ] {
+        assert!(
+            !labels.iter().any(|label| label == excluded),
+            "changing Card must NOT reach {excluded} (it uses only Button); got {labels:?}"
+        );
+    }
+
+    // Exactly three downstream files — no over-reporting.
+    assert_eq!(json["summary"]["total_affected_files"].as_u64().unwrap(), 3);
+}
+
+/// Import cycles must not hang the traversal or mis-depth nodes. With a <-> b
+/// cyclic and c -> a, changing b reaches a (depth 1) and c (depth 2), and the
+/// walk terminates.
+#[test]
+fn file_mode_terminates_and_is_correct_on_import_cycles() {
+    let repo = tempdir().unwrap();
+    fs::create_dir_all(repo.path().join("src")).unwrap();
+    fs::write(repo.path().join("package.json"), r#"{"name":"cyc"}"#).unwrap();
+    fs::write(
+        repo.path().join("src/a.ts"),
+        "import { b } from './b';\nexport const a = () => b();\n",
+    )
+    .unwrap();
+    fs::write(
+        repo.path().join("src/b.ts"),
+        "import { a } from './a';\nexport const b = () => a();\n",
+    )
+    .unwrap();
+    fs::write(
+        repo.path().join("src/c.ts"),
+        "import { a } from './a';\nexport const c = () => a();\n",
+    )
+    .unwrap();
+
+    let json = run_json(repo.path(), &["file", "src/b.ts"]);
+    assert_eq!(depth_of(&json, "src/a.ts"), Some(1));
+    assert_eq!(depth_of(&json, "src/c.ts"), Some(2));
+    assert_eq!(json["summary"]["total_affected_files"].as_u64().unwrap(), 2);
+}
+
+/// A file reachable by several paths is reported once, at its shortest depth.
+/// d is imported by e and f (depth 1), both imported by g — g must appear once
+/// at depth 2.
+#[test]
+fn file_mode_reports_diamond_dependents_once_at_shortest_depth() {
+    let repo = tempdir().unwrap();
+    fs::create_dir_all(repo.path().join("src")).unwrap();
+    fs::write(repo.path().join("package.json"), r#"{"name":"diamond"}"#).unwrap();
+    fs::write(repo.path().join("src/d.ts"), "export const d = 1;\n").unwrap();
+    fs::write(
+        repo.path().join("src/e.ts"),
+        "import { d } from './d';\nexport const e = d;\n",
+    )
+    .unwrap();
+    fs::write(
+        repo.path().join("src/f.ts"),
+        "import { d } from './d';\nexport const f = d;\n",
+    )
+    .unwrap();
+    fs::write(
+        repo.path().join("src/g.ts"),
+        "import { e } from './e';\nimport { f } from './f';\nexport const g = e + f;\n",
+    )
+    .unwrap();
+
+    let json = run_json(repo.path(), &["file", "src/d.ts"]);
+    assert_eq!(depth_of(&json, "src/e.ts"), Some(1));
+    assert_eq!(depth_of(&json, "src/f.ts"), Some(1));
+    assert_eq!(depth_of(&json, "src/g.ts"), Some(2));
+    assert_eq!(label_count(&node_labels(&json), "src/g.ts"), 1);
+    assert_eq!(json["summary"]["total_affected_files"].as_u64().unwrap(), 3);
+}
+
+/// `vi.mock("./real")` makes the test depend on the real module — changing the
+/// real module must reach the mocking test in the blast radius (and nothing
+/// unrelated).
+#[test]
+fn file_mode_reaches_test_files_that_mock_the_module() {
+    let repo = tempdir().unwrap();
+    fs::create_dir_all(repo.path().join("src")).unwrap();
+    fs::write(repo.path().join("package.json"), r#"{"name":"mock-reach"}"#).unwrap();
+    fs::write(
+        repo.path().join("src/real.ts"),
+        "export const realThing = 1;\n",
+    )
+    .unwrap();
+    fs::write(
+        repo.path().join("src/real.test.ts"),
+        "import { vi } from \"vitest\";\nvi.mock(\"./real\");\n",
+    )
+    .unwrap();
+    fs::write(
+        repo.path().join("src/other.ts"),
+        "export const unrelated = 2;\n",
+    )
+    .unwrap();
+
+    let json = run_json(repo.path(), &["file", "src/real.ts"]);
+    let labels = node_labels(&json);
+    assert!(
+        labels.iter().any(|label| label == "src/real.test.ts"),
+        "changing the real module should reach the test that mocks it; got {labels:?}"
+    );
+    assert!(
+        !labels.iter().any(|label| label == "src/other.ts"),
+        "unrelated files must not be in the blast radius; got {labels:?}"
+    );
+    assert_eq!(json["summary"]["total_affected_files"].as_u64().unwrap(), 1);
 }
 
 #[test]
