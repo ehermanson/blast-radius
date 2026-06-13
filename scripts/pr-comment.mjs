@@ -47,7 +47,7 @@ export function renderComment(result) {
   if (total === 0) {
     lines.push(`${tier.emoji} **No downstream files impacted** by the changed files.`);
     lines.push('', changedSection(changed));
-    lines.push('', confidenceNote(result));
+    lines.push('', '---', '', confidenceNote(result));
     return finalize(lines);
   }
 
@@ -97,7 +97,7 @@ export function renderComment(result) {
     lines.push('</details>');
   }
 
-  lines.push('', confidenceNote(result));
+  lines.push('', '---', '', confidenceNote(result));
   return finalize(lines);
 }
 
