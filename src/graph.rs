@@ -204,6 +204,8 @@ pub enum EdgeKind {
     UsesJsxComponent,
     RequiresModule,
     CommonJsExport,
+    /// A `vi.mock("...")` / `jest.mock("...")` module reference in a test.
+    MocksModule,
 }
 
 #[derive(Debug, Clone)]

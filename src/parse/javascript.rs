@@ -125,15 +125,16 @@ pub(super) fn module_facts_from_javascript_module(
     Ok(facts)
 }
 
-/// Collect dynamic `import("...")` calls. They can appear anywhere in the
-/// module (lazy routes, code-split components), so this needs a full AST walk
-/// rather than the top-level item loop. Each one is recorded as a namespace
-/// import under a synthetic local — the call evaluates to the whole module's
-/// namespace, and the synthetic name can't collide with a real identifier.
+/// Collect call-expression dependencies that can appear anywhere in the module:
+/// dynamic `import("...")` (lazy routes, code-split components) and test-runner
+/// `vi.mock("...")` / `jest.mock("...")` references. Both need a full AST walk
+/// rather than the top-level item loop.
 fn collect_dynamic_imports(module: &Module, facts: &mut ModuleFacts) {
     let mut collector = DynamicImportCollector::default();
     module.visit_with(&mut collector);
 
+    // Dynamic imports evaluate to the whole module's namespace; record each
+    // under a synthetic local that can't collide with a real identifier.
     let mut seen = BTreeSet::new();
     for (index, source) in collector.sources.into_iter().enumerate() {
         if !seen.insert(source.clone()) {
@@ -151,11 +152,25 @@ fn collect_dynamic_imports(module: &Module, facts: &mut ModuleFacts) {
         // the walk counts the edge.
         facts.used_locals.insert(local);
     }
+
+    // Mock references depend on the whole real module (a change to it can break
+    // the mock), so model them as side-effect imports — but tagged `Mock` so the
+    // edge is labeled `mocks_module` rather than masquerading as a real import.
+    let mut seen_mocks = BTreeSet::new();
+    for (index, source) in collector.mock_sources.into_iter().enumerate() {
+        if !seen_mocks.insert(source.clone()) {
+            continue;
+        }
+        facts
+            .imports
+            .push(side_effect_import(source, ImportKind::Mock, index));
+    }
 }
 
 #[derive(Default)]
 struct DynamicImportCollector {
     sources: Vec<String>,
+    mock_sources: Vec<String>,
 }
 
 impl Visit for DynamicImportCollector {
@@ -166,7 +181,35 @@ impl Visit for DynamicImportCollector {
             && let Some(source) = literal_string(&argument.expr)
         {
             self.sources.push(source);
+        } else if let Some(source) = mock_call_source(call) {
+            self.mock_sources.push(source);
         }
+    }
+}
+
+/// The string-literal module specifier of a `vi.mock(...)` / `jest.mock(...)`
+/// (or `doMock`) call, if this call is one. Other call shapes return `None`.
+fn mock_call_source(call: &CallExpr) -> Option<String> {
+    let Callee::Expr(callee) = &call.callee else {
+        return None;
+    };
+    let Expr::Member(member) = &**callee else {
+        return None;
+    };
+    let Expr::Ident(object) = &*member.obj else {
+        return None;
+    };
+    let MemberProp::Ident(method) = &member.prop else {
+        return None;
+    };
+    let is_runner = matches!(object.sym.as_ref(), "vi" | "jest");
+    let is_mock = matches!(method.sym.as_ref(), "mock" | "doMock");
+    if is_runner && is_mock {
+        call.args
+            .first()
+            .and_then(|argument| literal_string(&argument.expr))
+    } else {
+        None
     }
 }
 
@@ -717,6 +760,40 @@ setTimeout(() => require('./worker').start(), 0);
         assert_eq!(worker.kind, ImportKind::CommonJs);
         // The call site is the usage, so the edge must count in the walk.
         assert!(facts.used_locals.contains(&worker.local));
+    }
+
+    #[test]
+    fn collects_vitest_and_jest_mock_references() {
+        let facts = parse(
+            "widget.test.ts",
+            r#"
+import { vi } from "vitest";
+vi.mock("./real-module");
+jest.mock("@scope/pkg");
+vi.doMock("./lazy-mock");
+vi.unmock("./not-a-dep");
+something.mock("./also-not-a-dep");
+"#,
+        );
+
+        for source in ["./real-module", "@scope/pkg", "./lazy-mock"] {
+            let mock = facts
+                .imports
+                .iter()
+                .find(|import| import.source == source)
+                .unwrap_or_else(|| panic!("mock of {source} should be collected"));
+            assert_eq!(mock.imported, ImportTarget::SideEffect);
+            assert_eq!(mock.kind, ImportKind::Mock);
+            assert!(!mock.type_only);
+        }
+
+        // unmock removes a mock, and a non-runner `.mock(...)` is unrelated.
+        assert!(
+            !facts
+                .imports
+                .iter()
+                .any(|import| import.source == "./not-a-dep" || import.source == "./also-not-a-dep")
+        );
     }
 
     #[test]

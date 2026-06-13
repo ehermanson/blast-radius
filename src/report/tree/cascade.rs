@@ -351,6 +351,7 @@ fn edge_label(kind: EdgeKind, is_ambiguous: bool, theme: &Theme) -> String {
         EdgeKind::UsesJsxComponent => "component use",
         EdgeKind::RequiresModule => "require",
         EdgeKind::CommonJsExport => "re-exported local",
+        EdgeKind::MocksModule => "mock",
     };
 
     if is_ambiguous {

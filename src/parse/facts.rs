@@ -70,6 +70,10 @@ pub enum ImportKind {
     CommonJs,
     /// A dynamic `import("...")` call, e.g. a lazy route or code-split component.
     Dynamic,
+    /// A test-runner mock reference (`vi.mock("...")`, `jest.mock("...")`). The
+    /// mocking file depends on the real module — changes to it can break the
+    /// mock — but it's labeled distinctly so consumers can tell mocks apart.
+    Mock,
 }
 
 #[derive(Debug, Clone)]

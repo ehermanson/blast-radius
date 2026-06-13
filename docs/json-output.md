@@ -87,7 +87,7 @@ One entry per analyzed input file:
 | -------------- | ------- | --------------------------------------------------- |
 | `from`         | string  | Source node `id` (the depended-upon side).          |
 | `to`           | string  | Target node `id` (the dependent side).              |
-| `kind`         | string  | One of `imports_named`, `imports_default`, `imports_namespace`, `imports_dynamic`, `reexports_named`, `reexports_star`, `uses_jsx_component`, `requires_module`, `commonjs_export`. |
+| `kind`         | string  | One of `imports_named`, `imports_default`, `imports_namespace`, `imports_dynamic`, `reexports_named`, `reexports_star`, `uses_jsx_component`, `requires_module`, `commonjs_export`, `mocks_module`. |
 | `is_ambiguous` | boolean | Resolution for this edge was ambiguous; counted in `summary.ambiguous_edges`. |
 
 ## Example: gate on the verdict in a script

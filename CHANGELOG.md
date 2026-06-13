@@ -19,8 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Accuracy corpus now spans both repo shapes: the existing Chakra UI snapshot
   (library) plus an Excalidraw snapshot (a real React **application** —
   route/lazy code-splitting, dynamic imports). Baseline: zero missed edges on
-  Chakra UI (2697 files); on Excalidraw the only two are `vi.mock()` calls in a
-  test-setup file (test-runner mock magic, not modeled).
+  both Chakra UI (2697 files) and Excalidraw.
+- `vi.mock("...")` / `jest.mock("...")` (and `doMock`) references now create
+  dependency edges from the test to the real module — a change to it can break
+  the mock — labeled with a distinct `mocks_module` edge kind so they're not
+  confused with real imports. This was the only gap the accuracy oracle found on
+  Excalidraw.
 
 ## [0.5.0] - 2026-06-13
 

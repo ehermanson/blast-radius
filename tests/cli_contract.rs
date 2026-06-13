@@ -346,6 +346,40 @@ fn graph_command_dumps_full_forward_import_graph() {
 }
 
 #[test]
+fn vi_mock_creates_a_mocks_module_edge() {
+    let repo = tempdir().unwrap();
+    fs::create_dir_all(repo.path().join("src")).unwrap();
+    fs::write(repo.path().join("package.json"), r#"{"name":"m"}"#).unwrap();
+    fs::write(repo.path().join("src/real.ts"), "export const x = 1;\n").unwrap();
+    fs::write(
+        repo.path().join("src/real.test.ts"),
+        "import { vi } from \"vitest\";\nvi.mock(\"./real\");\n",
+    )
+    .unwrap();
+
+    let output = blast_radius(repo.path())
+        .args(["--format", "json", "graph"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    let id_to_label: std::collections::HashMap<&str, &str> = json["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| (n["id"].as_str().unwrap(), n["label"].as_str().unwrap()))
+        .collect();
+    let mock_edge = json["edges"].as_array().unwrap().iter().find(|e| {
+        id_to_label[e["to"].as_str().unwrap()] == "src/real.test.ts"
+            && id_to_label[e["from"].as_str().unwrap()] == "src/real.ts"
+    });
+    let mock_edge = mock_edge.expect("vi.mock should create an edge to the real module");
+    assert_eq!(mock_edge["kind"], "mocks_module");
+}
+
+#[test]
 fn graph_command_tree_format_lists_edges() {
     let repo = setup_repo();
     blast_radius(repo.path())

@@ -130,6 +130,7 @@ pub(super) fn build_reverse_links(
 /// the reverse-link builder and the whole-repo `graph` dump.
 pub(super) fn import_edge_kind(imported: &ImportTarget, kind: ImportKind) -> EdgeKind {
     match (imported, kind) {
+        (_, ImportKind::Mock) => EdgeKind::MocksModule,
         (_, ImportKind::Dynamic) => EdgeKind::ImportsDynamic,
         (_, ImportKind::CommonJs) => EdgeKind::RequiresModule,
         (ImportTarget::Default, _) => EdgeKind::ImportsDefault,
