@@ -154,11 +154,8 @@ function confidenceNote(result) {
     caveats.push(`${summary.parse_failures} parse failures may hide consumers`);
   }
   if (caveats.length) note += ` · ${caveats.join(' · ')}`;
-  // A thin, muted rule + footer. GitHub strips CSS, so a markdown `---` would be
-  // a heavy `<hr>`; a light box-drawing line kept inside <sub> reads as a subtle
-  // footnote separator instead.
-  const rule = '─'.repeat(36);
-  return `<sub>${rule}<br>${note} · <a href="${REPO_URL}">blast-radius</a></sub>`;
+  // Small, muted footnote — no rule. The <sub> sizing is enough separation.
+  return `<sub>${note} · <a href="${REPO_URL}">blast-radius</a></sub>`;
 }
 
 const plural = (n, word) => (n === 1 ? word : `${word}s`);
