@@ -19,8 +19,12 @@ module.exports = {
       exportsFields: ['exports'],
       conditionNames: ['import', 'require', 'node', 'default', 'types'],
     },
-    // Include type-only imports: blast-radius counts them as edges too.
-    tsPreCompilationDeps: true,
+    // Deliberately NOT enabling tsPreCompilationDeps: it runs the full TS
+    // compiler over the whole project (OOMs on CI for thousand-file repos) and
+    // only adds type-only imports. We compare runtime/value edges — exactly
+    // what a blast radius is about — so the reference stays a clean subset:
+    // blast-radius may find MORE (type-only, workspace), never fewer.
+    tsPreCompilationDeps: false,
     ...(tsConfigFileName ? { tsConfig: { fileName: tsConfigFileName } } : {}),
   },
 };
