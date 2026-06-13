@@ -103,12 +103,29 @@ function blastRadiusEdges(fixture) {
 function referenceEdges(fixture, files, tsconfig) {
   const args = ['--yes', DC_VERSION, '--config', DC_CONFIG, '--output-type', 'json'];
   for (const f of files) args.push(rel(fixture, f));
-  const stdout = execFileSync('npx', args, {
-    cwd: fixture,
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-    env: { ...process.env, BR_TSCONFIG: tsconfig || '' },
-  });
+  let stdout;
+  try {
+    stdout = execFileSync('npx', args, {
+      cwd: fixture,
+      encoding: 'utf8',
+      maxBuffer: 256 * 1024 * 1024,
+      env: { ...process.env, BR_TSCONFIG: tsconfig || '' },
+    });
+  } catch (error) {
+    // dependency-cruiser exits non-zero when it counts rule violations; with no
+    // rules that shouldn't happen, but be robust: if it still emitted the graph
+    // JSON on stdout, use it. Otherwise surface its stderr (swallowing it turns
+    // every failure into an opaque "Command failed").
+    const out = (error.stdout || '').toString();
+    if (out.trimStart().startsWith('{')) {
+      stdout = out;
+    } else {
+      const stderr = (error.stderr || '').toString();
+      throw new Error(
+        `dependency-cruiser failed (exit ${error.status}). stderr:\n${stderr}`,
+      );
+    }
+  }
   const data = JSON.parse(stdout);
   const edges = new Set();
   const unresolved = []; // { from, module }
