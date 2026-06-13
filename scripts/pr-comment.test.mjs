@@ -49,15 +49,14 @@ test('headline reports tier, totals, and package count', () => {
   assert.match(md, /4 direct, 1 indirect/);
 });
 
-test('lists impacted files grouped by directory, as basenames, excluding the changed file', () => {
+test('lists impacted files as a flat list of repo-relative paths, excluding the changed file', () => {
   const md = renderComment(impactResult);
-  // apps/storefront/src has 3 impacted (App, PromoCard, LegacyButtonCard).
-  assert.match(md, /\*\*`apps\/storefront\/src`\*\* \(3\)/);
-  assert.match(md, /- App\.tsx/);
-  // The list uses basenames, not full paths.
-  assert.ok(!md.includes('- apps/storefront/src/App.tsx'));
+  assert.match(md, /- `apps\/storefront\/src\/App\.tsx`/);
+  // No directory-grouping headers or "where it lands" summary.
+  assert.ok(!md.includes('Where it lands'));
+  assert.ok(!md.includes('**`apps/storefront/src`**'));
   // The changed root and export-kind nodes are not listed as impacted.
-  assert.ok(!md.includes('- Button.tsx'));
+  assert.ok(!md.includes('- `packages/ui/src/Button.tsx`'));
   assert.ok(!md.includes('#Button'));
 });
 
@@ -129,14 +128,15 @@ test('multiple changed files get a per-file impact breakdown', () => {
     ],
   });
   assert.match(md, /\*\*What each changed file reaches\*\*/);
-  // Each changed file gets attributed impact...
-  assert.match(md, /`a\.ts` — 2 impacted files \(2 direct, 0 indirect\)/);
-  assert.match(md, /- x\.ts/);
+  // Each changed file gets attributed impact, with the path as <code> (renders
+  // inside <summary>, where markdown backticks would not).
+  assert.match(md, /<code>a\.ts<\/code> — 2 impacted files \(2 direct, 0 indirect\)/);
+  assert.match(md, /- `src\/x\.ts`/);
   // ...including "this change reaches nothing".
-  assert.match(md, /`b\.ts` — no downstream impact/);
+  assert.match(md, /<code>b\.ts<\/code> — no downstream impact/);
 });
 
-test('large radii get a "where it lands" summary and a capped list', () => {
+test('a huge radius is capped so the comment stays under the size limit', () => {
   const nodes = Array.from({ length: 250 }, (_, i) => ({
     kind: 'file',
     label: `src/dir-${i % 10}/file-${i}.ts`,
@@ -155,8 +155,6 @@ test('large radii get a "where it lands" summary and a capped list', () => {
     nodes,
     workspaces: [],
   });
-  assert.match(md, /\*\*Where it lands\*\*/);
-  assert.match(md, /…and 4 more directories/);
-  assert.match(md, /…and \d+ more\./);
+  assert.match(md, /…and 150 more/);
   assert.ok(md.length < 65000, 'comment must stay under the GitHub comment limit');
 });
