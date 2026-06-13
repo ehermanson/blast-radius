@@ -115,6 +115,17 @@ jobs:
       - name: Run tests
         run: cargo test
 
+  # Renderer for the GitHub Action's PR comment (pure JSON -> Markdown).
+  pr-comment-renderer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+      - name: Test PR-comment renderer
+        run: node --test scripts/pr-comment.test.mjs
+
   # ── accuracy oracle — validate the import graph (resolution) ─────────────
   # blast-radius's import edges must not MISS any edge a mature independent
   # resolver (dependency-cruiser) finds. `--strict` fails on reference-only

@@ -134,6 +134,32 @@ usage error (so CI can tell a misspelled flag apart from a tripped gate).
 See `docs/local-toolchain.md` for ready-to-paste examples with `lint-staged`,
 Lefthook, and the `pre-commit` framework.
 
+### GitHub Action
+
+To comment a change's blast radius directly on pull requests (and optionally
+gate on risk), use the action:
+
+```yaml
+# .github/workflows/blast-radius.yml
+name: blast-radius
+on: pull_request
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  blast-radius:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: ehermanson/blast-radius@main # pin to a release tag once published
+        with:
+          fail-on-risk: high # optional
+```
+
+It posts one sticky comment and updates it in place. See
+`docs/github-action.md` for all inputs.
+
 ## Reading the output
 
 The default `tree` output leads with a **risk verdict** — `minor`, `moderate`,

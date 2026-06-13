@@ -1,0 +1,90 @@
+name: 'blast-radius'
+description: "Comment a pull request's blast radius — the files a change reaches — and optionally gate on risk."
+branding:
+  icon: 'target'
+  color: 'orange'
+
+inputs:
+  repo-root:
+    description: 'Repository root to analyze.'
+    default: '.'
+  version:
+    description: 'Version of blast-radius-cli to run (npm dist-tag or exact version).'
+    default: 'latest'
+  fail-on-risk:
+    description: 'Fail the check when the verdict is at or above this tier (minor|moderate|risky|high). Empty disables gating.'
+    default: ''
+  comment:
+    description: 'Post/update a sticky PR comment.'
+    default: 'true'
+  github-token:
+    description: 'Token used to post the comment.'
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v6
+      with:
+        node-version: 20
+
+    - name: Analyze changed files
+      id: analyze
+      shell: bash
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      run: |
+        set -euo pipefail
+        if [ -z "${BASE_SHA:-}" ]; then
+          echo "::warning::blast-radius: not a pull_request event; skipping."
+          echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
+        fi
+        # Changed source files (added/modified/renamed; deletions excluded).
+        git diff --name-only --diff-filter=d "$BASE_SHA" "$HEAD_SHA" \
+          | grep -E '\.(js|jsx|ts|tsx|mjs|cjs|mts|cts|vue|svelte)$' > changed.txt || true
+        if [ ! -s changed.txt ]; then
+          echo "blast-radius: no source files changed."
+          echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
+        fi
+        npx --yes "blast-radius-cli@${{ inputs.version }}" \
+          --repo-root "${{ inputs.repo-root }}" --format json files - < changed.txt > result.json
+        node "$GITHUB_ACTION_PATH/scripts/pr-comment.mjs" < result.json > comment.md
+        echo "skip=false" >> "$GITHUB_OUTPUT"
+
+    - name: Post sticky comment
+      if: steps.analyze.outputs.skip == 'false' && inputs.comment == 'true'
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const fs = require('fs');
+          const body = fs.readFileSync('comment.md', 'utf8');
+          const marker = '<!-- blast-radius -->';
+          const { owner, repo } = context.repo;
+          const issue_number = context.issue.number;
+          const comments = await github.paginate(github.rest.issues.listComments, {
+            owner, repo, issue_number,
+          });
+          const existing = comments.find((c) => c.body && c.body.includes(marker));
+          if (existing) {
+            await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+          } else {
+            await github.rest.issues.createComment({ owner, repo, issue_number, body });
+          }
+
+    - name: Risk gate
+      if: steps.analyze.outputs.skip == 'false' && inputs.fail-on-risk != ''
+      shell: bash
+      run: |
+        node -e '
+          const r = require("./result.json");
+          const order = ["minor", "moderate", "risky", "high"];
+          const tier = r.summary.risk_tier;
+          const threshold = process.argv[1];
+          if (order.indexOf(tier) >= order.indexOf(threshold)) {
+            console.error(`::error::blast-radius: risk "${tier}" is at or above "${threshold}".`);
+            process.exit(2);
+          }
+          console.log(`blast-radius: risk "${tier}" is below "${threshold}".`);
+        ' "${{ inputs.fail-on-risk }}"
