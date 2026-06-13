@@ -1,9 +1,13 @@
 # CI: what each job means
 
-Every push and pull request runs [`.github/workflows/quality.yml`](../.github/workflows/quality.yml).
-The jobs fall into two groups: **correctness** (does blast-radius compute the
-right answer?) and **hygiene** (does it build and lint cleanly?). If a check goes
-red, find the job below to know what broke.
+Every push and pull request runs the [CI workflow](../.github/workflows/quality.yml).
+Jobs are named by what they protect:
+
+- **`lint`, `msrv`** — build / hygiene.
+- **`test`, `test-*`** — the reported **blast radius** (the `cargo test` suite).
+- **`accuracy-oracle`** — the **import graph** (resolution vs dependency-cruiser).
+
+If a check goes red, find the job below to know what broke.
 
 ## Correctness
 
@@ -13,7 +17,7 @@ blast-radius's answer has two parts, validated by two independent layers:
 2. the **blast radius** — given a changed file, does it report the right set of
    transitive dependents?
 
-### Layer 1 — the import graph (the `accuracy` job)
+### Layer 1 — the import graph (the `accuracy-oracle` job)
 
 Runs the accuracy oracle (`scripts/accuracy/oracle.mjs --strict`), which diffs
 blast-radius's import edges against [dependency-cruiser](https://github.com/sverweij/dependency-cruiser),
@@ -36,10 +40,10 @@ repos. These jobs all run `cargo test`:
 
 | Job | What it runs | A failure means |
 | --- | --- | --- |
-| `quality` | core JS/TS suite + coverage floor + Chakra stress run | a JS/TS behavior or coverage regression |
-| `all-features` | the suite with `python,rust,vue,svelte` compiled in | a cross-language / feature-interaction regression |
-| `python` / `rust` / `components` | each optional adapter's tests | that adapter regressed |
-| `windows` | the suite on Windows | a path/separator regression |
+| `test` | core JS/TS suite + coverage floor + Chakra stress run | a JS/TS behavior or coverage regression |
+| `test-all-languages` | the suite with `python,rust,vue,svelte` compiled in | a cross-language / feature-interaction regression |
+| `test-python` / `test-rust` / `test-vue-svelte` | each optional adapter's tests | that adapter regressed |
+| `test-windows` | the suite on Windows | a path/separator regression |
 
 **What layer 2 catches:** traversal/reachability bugs, symbol precision (a
 `Card` change must not reach a file that imports only `Button` through the same
@@ -61,7 +65,8 @@ reporting something unreachable.
 
 ## Summary: "this check is red, so…"
 
-- **`accuracy`** → an import stopped resolving correctly (graph).
-- **`quality` / `all-features` / `python` / `rust` / `components` / `windows`** →
-  the computed blast radius (or a test/coverage invariant) regressed.
+- **`accuracy-oracle`** → an import stopped resolving correctly (graph).
+- **`test` / `test-all-languages` / `test-python` / `test-rust` /
+  `test-vue-svelte` / `test-windows`** → the computed blast radius (or a
+  test/coverage invariant) regressed.
 - **`lint` / `msrv`** → formatting, lint, or minimum-Rust-version issue.
