@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # needed to diff the PR base against its head
-      - uses: ehermanson/blast-radius@main # or a release tag once published
+      - uses: ehermanson/blast-radius@v0.7.0 # or @main to track latest
         with:
           # all optional:
           repo-root: .
@@ -49,9 +49,9 @@ of stale comments.
 
 ## Pinning
 
-Reference a release tag for stability (e.g. `ehermanson/blast-radius@v0.7.0`
-once published), or `@main` to track the latest. Pin `version:` too if you want
-the analyzer itself frozen.
+Reference a release tag for stability (e.g. `ehermanson/blast-radius@v0.7.0`),
+or `@main` to track the latest. Pin `version:` too if you want the analyzer
+itself frozen.
 
 ## How it's tested
 

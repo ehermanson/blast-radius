@@ -7,14 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-13
+
 ### Added
 
 - GitHub Action (`action.yml`): post a sticky pull-request comment with a
-  change's blast radius — the files it reaches, grouped by package, with the
-  risk verdict — and optionally fail the check via `fail-on-risk`. It computes
-  changed files with git and pipes them to the binary, so the analyzer stays
-  pure. The comment renderer is decoupled and unit-tested (`node --test`); see
-  `docs/github-action.md`.
+  change's blast radius — per changed file, the files it reaches, with the risk
+  verdict and a linked confidence read — and optionally fail the check via
+  `fail-on-risk`. It computes changed files with git and pipes them to the
+  binary, so the analyzer stays pure. The comment renderer is decoupled and
+  unit-tested (`node --test`); see `docs/github-action.md`.
 
 ## [0.6.0] - 2026-06-13
 

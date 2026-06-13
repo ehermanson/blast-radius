@@ -152,7 +152,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - uses: ehermanson/blast-radius@main # pin to a release tag once published
+      - uses: ehermanson/blast-radius@v0.7.0
         with:
           fail-on-risk: high # optional
 ```
