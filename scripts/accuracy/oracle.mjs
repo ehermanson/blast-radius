@@ -109,12 +109,18 @@ function referenceEdges(fixture, files, tsconfig) {
       cwd: fixture,
       encoding: 'utf8',
       maxBuffer: 256 * 1024 * 1024,
-      env: { ...process.env, BR_TSCONFIG: tsconfig || '' },
+      // Give the child a generous heap; the reference graph for a large repo
+      // can be memory-heavy and CI runners default node's old-space low.
+      env: {
+        ...process.env,
+        BR_TSCONFIG: tsconfig || '',
+        NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --max-old-space-size=6144`.trim(),
+      },
     });
   } catch (error) {
     // dependency-cruiser exits non-zero when it counts rule violations; with no
     // rules that shouldn't happen, but be robust: if it still emitted the graph
-    // JSON on stdout, use it. Otherwise surface its stderr (swallowing it turns
+    // JSON on stdout, use it. Otherwise surface everything (swallowing it turns
     // every failure into an opaque "Command failed").
     const out = (error.stdout || '').toString();
     if (out.trimStart().startsWith('{')) {
@@ -122,7 +128,9 @@ function referenceEdges(fixture, files, tsconfig) {
     } else {
       const stderr = (error.stderr || '').toString();
       throw new Error(
-        `dependency-cruiser failed (exit ${error.status}). stderr:\n${stderr}`,
+        `dependency-cruiser failed (status=${error.status} signal=${error.signal} ` +
+          `code=${error.code}).\n--- stderr (last 3000) ---\n${stderr.slice(-3000)}\n` +
+          `--- stdout (last 1500) ---\n${out.slice(-1500)}`,
       );
     }
   }
