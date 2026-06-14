@@ -104,6 +104,16 @@ pub(super) fn is_internal_javascript_specifier(
         return true;
     }
 
+    // Alias-looking specifiers that matched no configured alias above are still
+    // treated as internal, so an unresolved alias (e.g. one defined only in a
+    // bundler config we don't read) surfaces as an unresolved-import warning
+    // rather than being silently dropped as an external package. `@/…` is not a
+    // valid scoped package (those are `@scope/name`) and no npm package starts
+    // with `~`, so both are unambiguous alias conventions.
+    if specifier.starts_with("@/") || specifier.starts_with('~') {
+        return true;
+    }
+
     package_specifier_parts(specifier)
         .map(|(package_name, _)| ctx.package_by_name.contains_key(package_name))
         .unwrap_or(false)

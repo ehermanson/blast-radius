@@ -243,7 +243,7 @@ The default binary supports **JavaScript and TypeScript** (`js`, `jsx`, `ts`,
 component usage tracking and `React.lazy()`/dynamic `import()` detection —
 including ESM imports/exports, CommonJS `require`/`module.exports`,
 default and named exports, barrels, `export *`, side-effect imports
-(`import './setup'`), `tsconfig.json` path aliases, `baseUrl`, `extends`
+(`import './setup'`), `tsconfig.json`/`jsconfig.json` path aliases, `baseUrl`, `extends`
 chains (including `tsconfig.base.json`-style shared configs), project
 `references` (aliases in referenced configs like `tsconfig.lib.json` are
 honored), package `imports`/`exports`, the `browser` entry field,

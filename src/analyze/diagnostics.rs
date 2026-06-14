@@ -87,6 +87,12 @@ fn unresolved_reason(specifier: &str) -> &'static str {
     if specifier.starts_with('#') {
         return "package.json imports";
     }
+    // `@/…` / `~…` are path-alias conventions; if they reach here the alias isn't
+    // visible to blast-radius (often defined only in a bundler config, or in a
+    // jsconfig/tsconfig we didn't find). Point the user at how to fix it.
+    if specifier.starts_with("@/") || specifier.starts_with('~') {
+        return "path alias not configured (add it to tsconfig/jsconfig paths, or .blast-radius.json)";
+    }
     if specifier.starts_with('@') {
         return "tsconfig paths or workspace package export";
     }

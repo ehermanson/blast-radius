@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `jsconfig.json` path aliases now resolve (it's `tsconfig.json` for JS
+  projects — same `paths`/`baseUrl` format), so JS repos' `@/…` imports connect
+  instead of being missed.
+
+### Fixed
+
+- Alias-looking imports (`@/…`, `~…`) that resolve nowhere visible — e.g. an
+  alias defined only in a bundler config — are now reported as unresolved (with
+  a hint to configure the path) instead of being silently treated as external
+  packages. Silent under-counting was the most dangerous failure mode; now it
+  surfaces in the confidence read.
+
 ## [0.7.1] - 2026-06-13
 
 ### Changed

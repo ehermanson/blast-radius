@@ -134,7 +134,10 @@ impl RepoContext {
 
             let path = entry.into_path();
             match path.file_name().and_then(|name| name.to_str()) {
-                Some("tsconfig.json") => match load_tsconfig(&path) {
+                // jsconfig.json is tsconfig.json for JS projects (same format,
+                // same `paths`/`baseUrl` aliases) — load it the same way so JS
+                // repos' path aliases resolve.
+                Some("tsconfig.json") | Some("jsconfig.json") => match load_tsconfig(&path) {
                     Ok(config) => {
                         // Nx/Vite scaffolds keep aliases in a sibling config the
                         // tsconfig.json only references; pull those in when the

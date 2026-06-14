@@ -991,10 +991,64 @@ fn explain_unresolved_groups_internal_imports_by_reason() {
         .join("\n");
     assert!(warnings.contains("unresolved imports · relative or absolute path"));
     assert!(warnings.contains("./missing"));
-    assert!(warnings.contains("unresolved imports · tsconfig paths or workspace package export"));
+    // `@/…` is an alias convention — grouped as an unconfigured path alias, with
+    // a pointer to how to fix it, rather than silently dropped as an external.
+    assert!(warnings.contains("unresolved imports · path alias not configured"));
     assert!(warnings.contains("@/also-missing"));
     assert!(warnings.contains("unresolved imports · package.json imports"));
     assert!(warnings.contains("#not-configured"));
+}
+
+/// JS projects keep path aliases in jsconfig.json (tsconfig's JS twin), so those
+/// `@/…` imports must resolve like tsconfig paths do.
+#[test]
+fn jsconfig_json_path_aliases_resolve() {
+    let repo = tempdir().unwrap();
+    fs::create_dir_all(repo.path().join("src")).unwrap();
+    fs::write(repo.path().join("package.json"), r#"{"name":"js-app"}"#).unwrap();
+    fs::write(
+        repo.path().join("jsconfig.json"),
+        r#"{"compilerOptions":{"baseUrl":".","paths":{"@/*":["src/*"]}}}"#,
+    )
+    .unwrap();
+    fs::write(repo.path().join("src/dep.js"), "export const dep = 1;\n").unwrap();
+    fs::write(
+        repo.path().join("src/consumer.js"),
+        "import { dep } from '@/dep';\nexport const v = dep;\n",
+    )
+    .unwrap();
+
+    let json = run_json(repo.path(), &["file", "src/dep.js"]);
+    assert!(
+        dependent_labels(&json)
+            .iter()
+            .any(|label| label == "src/consumer.js"),
+        "a jsconfig.json @/ alias should resolve"
+    );
+    assert_eq!(json["summary"]["unresolved_imports"].as_u64().unwrap(), 0);
+}
+
+/// An alias-looking import that resolves nowhere we can see (e.g. defined only in
+/// a bundler config) must be SURFACED as unresolved, not silently treated as an
+/// external package — silent under-counting is the worst failure for this tool.
+#[test]
+fn unconfigured_path_alias_is_flagged_not_silently_dropped() {
+    let repo = tempdir().unwrap();
+    fs::create_dir_all(repo.path().join("src")).unwrap();
+    fs::write(repo.path().join("package.json"), r#"{"name":"app"}"#).unwrap();
+    fs::write(repo.path().join("src/utils.ts"), "export const u = 1;\n").unwrap();
+    fs::write(
+        repo.path().join("src/consumer.ts"),
+        "import { u } from '~utils';\nexport const v = u;\n",
+    )
+    .unwrap();
+
+    let json = run_json(repo.path(), &["file", "src/consumer.ts"]);
+    assert_eq!(
+        json["summary"]["unresolved_imports"].as_u64().unwrap(),
+        1,
+        "an unresolved ~ alias must be counted, not silently dropped"
+    );
 }
 
 #[test]

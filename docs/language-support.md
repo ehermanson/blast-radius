@@ -37,7 +37,7 @@ usage to avoid false negatives.
 
 | Language | Feature flag | Notes |
 | --- | --- | --- |
-| JavaScript / TypeScript | (default) | ESM + CommonJS (incl. side-effect imports and `require()` anywhere in a module), dynamic `import()`, `vi.mock`/`jest.mock` references, default/named exports, barrels, `export *`, `tsconfig` path aliases with `extends` chains and project `references`, `.d.ts` files, cross-package resolution. Also the fallback for any unclaimed extension. |
+| JavaScript / TypeScript | (default) | ESM + CommonJS (incl. side-effect imports and `require()` anywhere in a module), dynamic `import()`, `vi.mock`/`jest.mock` references, default/named exports, barrels, `export *`, `tsconfig`/`jsconfig` path aliases with `extends` chains and project `references`, `.d.ts` files, cross-package resolution. Also the fallback for any unclaimed extension. |
 | Python | `python` | `rustpython-parser`. `import`/`from` imports (incl. submodule binds like `from pkg import submodule`), relative imports, package + `__init__.py` resolution, imports nested in `if TYPE_CHECKING:`/`try`/function bodies, top-level `def`/`class`/assignments, simple `__all__`. |
 | Rust | `rust` | `syn`. Public items, `mod`, `use crate::`/`self::`/`super::`, grouped use trees, `pub use` reexports, workspace cross-crate `use other_crate::...` via each crate's `Cargo.toml` package name. |
 | Vue | `vue` | Extracts `<script>` / `<script setup>` blocks (incl. `lang="ts"`) and parses them through the JS/TS parser; component file exposes a synthetic default export. |
