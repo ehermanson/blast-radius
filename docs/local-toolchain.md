@@ -63,7 +63,7 @@ Two gates are available and can be combined; if either trips, the exit code is
 ```json
 {
   "lint-staged": {
-    "*.{js,jsx,ts,tsx,vue,svelte}": "bash -c 'blast-radius --repo-root . files \"$@\" || true' --"
+    "*.{js,jsx,ts,tsx,vue,svelte,py,rs}": "bash -c 'blast-radius --repo-root . files \"$@\" || true' --"
   }
 }
 ```
@@ -74,7 +74,7 @@ Lefthook example:
 pre-commit:
   commands:
     blast-radius:
-      glob: "*.{js,jsx,ts,tsx,vue,svelte}"
+      glob: "*.{js,jsx,ts,tsx,vue,svelte,py,rs}"
       run: blast-radius --repo-root . files {staged_files} || true
 ```
 

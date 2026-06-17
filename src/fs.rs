@@ -26,6 +26,8 @@ pub struct RepoContext {
 struct ProjectConfig {
     #[serde(default)]
     unresolved: UnresolvedConfig,
+    #[serde(default)]
+    discovery: DiscoveryConfig,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -33,6 +35,13 @@ struct UnresolvedConfig {
     /// Import specifiers whose substring matches are not counted as unresolved.
     #[serde(default)]
     ignore: Vec<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct DiscoveryConfig {
+    /// Repo-relative files or directory prefixes to skip while walking.
+    #[serde(default)]
+    exclude: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -98,25 +107,30 @@ impl RepoContext {
         let mut package_jsons = Vec::new();
         let mut warnings = Vec::new();
 
-        let ignore_unresolved = match load_project_config(&repo_root) {
-            Ok(config) => config.unresolved.ignore,
+        let config = match load_project_config(&repo_root) {
+            Ok(config) => config,
             Err(error) => {
                 warnings.push(format!("{error:#}"));
-                Vec::new()
+                ProjectConfig::default()
             }
         };
+        let ignore_unresolved = config.unresolved.ignore.clone();
+        let discovery_excludes = config.discovery.exclude.clone();
 
+        let filter_repo_root = repo_root.clone();
         let walker = WalkBuilder::new(&repo_root)
             .hidden(false)
             .git_ignore(true)
             .git_exclude(true)
             .git_global(true)
-            .filter_entry(|entry| {
+            .filter_entry(move |entry| {
                 let name = entry.file_name().to_string_lossy();
-                !matches!(
+                let default_excluded = matches!(
                     name.as_ref(),
                     ".git" | "node_modules" | "dist" | "build" | "coverage" | ".next" | ".turbo"
-                )
+                );
+                !default_excluded
+                    && !is_custom_excluded(&filter_repo_root, entry.path(), &discovery_excludes)
             })
             .build();
 
@@ -208,6 +222,29 @@ fn load_project_config(repo_root: &Path) -> Result<ProjectConfig> {
 
     serde_json::from_value(value)
         .with_context(|| format!("failed to decode config {}", path.display()))
+}
+
+fn is_custom_excluded(repo_root: &Path, path: &Path, excludes: &[String]) -> bool {
+    if excludes.is_empty() {
+        return false;
+    }
+
+    let Ok(relative) = path.strip_prefix(repo_root) else {
+        return false;
+    };
+    let relative = crate::graph::normalize_separators(relative.display().to_string());
+    let relative = relative.trim_start_matches("./").trim_end_matches('/');
+    if relative.is_empty() {
+        return false;
+    }
+
+    excludes.iter().any(|exclude| {
+        let pattern = crate::graph::normalize_separators(exclude.as_str())
+            .trim_start_matches("./")
+            .trim_end_matches('/')
+            .to_string();
+        !pattern.is_empty() && (relative == pattern || relative.starts_with(&format!("{pattern}/")))
+    })
 }
 
 fn load_tsconfig(path: &Path) -> Result<TsConfigPath> {
@@ -480,6 +517,39 @@ mod tests {
             repo.ignore_unresolved,
             vec!["styled-system/css".to_string(), ".velite".to_string()]
         );
+    }
+
+    #[test]
+    fn skips_project_configured_discovery_excludes() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::create_dir_all(dir.path().join("generated")).unwrap();
+        fs::write(
+            dir.path().join("src").join("App.tsx"),
+            "export const App = () => null;",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("generated").join("client.ts"),
+            "export const generated = true;",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("generated").join("package.json"),
+            r#"{"name":"generated"}"#,
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join(".blast-radius.json"),
+            r#"{ "discovery": { "exclude": ["generated/"] } }"#,
+        )
+        .unwrap();
+
+        let repo = RepoContext::discover(dir.path()).unwrap();
+
+        assert_eq!(repo.source_files.len(), 1);
+        assert!(repo.source_files[0].ends_with("src/App.tsx"));
+        assert!(repo.package_jsons.is_empty());
     }
 
     #[test]

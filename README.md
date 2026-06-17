@@ -38,7 +38,7 @@ It is built first and foremost for JavaScript and TypeScript repos (including
 monorepos) — and that includes React: JSX/TSX is parsed natively, and JSX
 component usage is tracked at the symbol level, so it can tell a file that
 merely imports `Button` from one that actually renders `<Button />`. Vue and
-Svelte are first-class too, with Python and Rust as beta adapters.
+Svelte script imports are supported too, with Python and Rust as beta adapters.
 
 ## Quick start
 
@@ -152,7 +152,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - uses: ehermanson/blast-radius@v0.7.0
+      - uses: ehermanson/blast-radius@v0.7.3
         with:
           fail-on-risk: high # optional
 ```
@@ -265,11 +265,13 @@ cargo install --path . --features rust              # + Rust (beta)
 cargo install --path . --features python,rust,vue,svelte   # everything
 ```
 
-**Vue and Svelte** ride the same battle-tested JS/TS pipeline (script blocks
-are extracted and parsed as TypeScript/JavaScript). The **Python and Rust**
-adapters use real parsers and work well on conventionally structured repos,
-but are labeled beta: see `docs/language-support.md` for their known blind
-spots before trusting them on an unconventional layout.
+**Vue and Svelte** ride the same battle-tested JS/TS pipeline: `<script>` and
+`<script setup>` blocks are extracted and parsed as TypeScript/JavaScript, so
+component imports are tracked when they appear in script. Template-only
+component references with no script import are not visible yet. The **Python
+and Rust** adapters use real parsers and work well on conventionally structured
+repos, but are labeled beta: see `docs/language-support.md` for their known
+blind spots before trusting them on an unconventional layout.
 
 Ruby and Java adapters were removed in 0.3.0 — their heuristic parsers were
 not accurate enough on real codebases to trust, and a wrong "looks safe"
@@ -279,21 +281,27 @@ answer is worse than no answer (`docs/language-support.md` has the details;
 ## Configuration
 
 An optional `.blast-radius.json` at the repo root lets a repository declare
-tooling quirks the analyzer shouldn't hardcode. Today it supports ignoring
-import specifiers that point at generated/virtual modules (CSS-in-JS codegen,
-route type stubs, published `dist` output, etc.) so they don't count against the
-unresolved-import confidence signal:
+tooling quirks the analyzer shouldn't hardcode. It can ignore import specifiers
+that point at generated/virtual modules (CSS-in-JS codegen, route type stubs,
+published `dist` output, etc.) so they don't count against the unresolved-import
+confidence signal, and it can skip generated or vendored directories during repo
+discovery:
 
 ```jsonc
 {
   // comments and trailing commas are allowed (parsed as JSONC, like tsconfig)
+  "discovery": {
+    // repo-relative files or directory prefixes to skip while walking
+    "exclude": ["generated/", "vendor/snapshot/"],
+  },
   "unresolved": {
     "ignore": ["styled-system/css", ".velite", "/+types/"],
   },
 }
 ```
 
-Each entry is matched as a substring of the import specifier. Asset imports
+`discovery.exclude` entries are repo-relative prefixes. `unresolved.ignore`
+entries are matched as substrings of the import specifier. Asset imports
 (`.svg`, `.css`, `.json`, images, …) and type-only imports are ignored
 automatically. See `examples/chakra-ui/.blast-radius.json`.
 

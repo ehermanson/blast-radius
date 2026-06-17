@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-06-16
+
+### Added
+
+- `.blast-radius.json` now supports `discovery.exclude`, a list of
+  repo-relative files or directory prefixes to skip while walking the repo.
+  This gives large repos a safe escape hatch for generated, vendored, or
+  snapshot directories that should not be indexed.
+
+### Fixed
+
+- GitHub Action changed-file detection now includes Python (`.py`) and Rust
+  (`.rs`) files, matching the all-language prebuilt binary instead of silently
+  skipping those PR changes.
+- GitHub Action `fail-on-risk` now validates the configured tier and exits with
+  a usage error for invalid values.
+- The npm wrapper package metadata is now kept in sync with `Cargo.toml`, with
+  a CI/local quality check to catch version drift before release.
+
+### Documentation
+
+- Clarified that Vue/Svelte support tracks imports from `<script>` /
+  `<script setup>` blocks, while template-only component references without
+  script imports are not visible yet.
+
 ## [0.7.2] - 2026-06-13
 
 ### Added

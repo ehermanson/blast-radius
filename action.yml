@@ -42,7 +42,7 @@ runs:
         fi
         # Changed source files (added/modified/renamed; deletions excluded).
         git diff --name-only --diff-filter=d "$BASE_SHA" "$HEAD_SHA" \
-          | grep -E '\.(js|jsx|ts|tsx|mjs|cjs|mts|cts|vue|svelte)$' > changed.txt || true
+          | grep -E '\.(js|jsx|ts|tsx|mjs|cjs|mts|cts|vue|svelte|py|rs)$' > changed.txt || true
         if [ ! -s changed.txt ]; then
           echo "blast-radius: no source files changed."
           echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
@@ -82,6 +82,10 @@ runs:
           const order = ["minor", "moderate", "risky", "high"];
           const tier = r.summary.risk_tier;
           const threshold = process.argv[1];
+          if (!order.includes(threshold)) {
+            console.error(`::error::blast-radius: invalid fail-on-risk "${threshold}". Expected one of: ${order.join(", ")}.`);
+            process.exit(64);
+          }
           if (order.indexOf(tier) >= order.indexOf(threshold)) {
             console.error(`::error::blast-radius: risk "${tier}" is at or above "${threshold}".`);
             process.exit(2);

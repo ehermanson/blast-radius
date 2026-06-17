@@ -1,6 +1,6 @@
 SHELL := /bin/zsh
 
-.PHONY: test test-python test-rust test-components test-all-languages coverage coverage-gate perf quality quality-python quality-rust quality-components stress-chakra stress-python-demo stress-fastapi stress-rust-demo stress-components smoke-mui build metrics fetch-examples lint fmt fmt-check
+.PHONY: test test-python test-rust test-components test-all-languages coverage coverage-gate perf quality quality-python quality-rust quality-components stress-chakra stress-python-demo stress-fastapi stress-rust-demo stress-components smoke-mui build metrics fetch-examples lint fmt fmt-check check-npm-version
 
 build:
 	cargo build
@@ -17,6 +17,9 @@ fmt:
 
 fmt-check:
 	cargo fmt --check
+
+check-npm-version:
+	node scripts/check-npm-version.mjs
 
 test:
 	cargo test
@@ -70,7 +73,7 @@ perf: build
 metrics: build fetch-examples
 	node scripts/collect_metrics.mjs
 
-quality: fmt-check lint test coverage-gate stress-chakra
+quality: fmt-check lint check-npm-version test coverage-gate stress-chakra
 
 quality-python: test-python stress-python-demo stress-fastapi
 

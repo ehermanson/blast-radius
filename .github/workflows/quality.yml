@@ -115,14 +115,16 @@ jobs:
       - name: Run tests
         run: cargo test
 
-  # Renderer for the GitHub Action's PR comment (pure JSON -> Markdown).
-  pr-comment-renderer:
+  # npm wrapper drift + GitHub Action comment rendering.
+  npm-and-action-checks:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
           node-version: 20
+      - name: Check npm wrapper version
+        run: node scripts/check-npm-version.mjs
       - name: Test PR-comment renderer
         run: node --test scripts/pr-comment.test.mjs
 
