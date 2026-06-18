@@ -1,6 +1,6 @@
 SHELL := /bin/zsh
 
-.PHONY: test test-python test-rust test-components test-all-languages coverage coverage-gate perf quality quality-python quality-rust quality-components stress-chakra stress-python-demo stress-fastapi stress-rust-demo stress-components smoke-mui build metrics fetch-examples lint fmt fmt-check check-npm-version
+.PHONY: test test-python test-rust test-components test-all-languages coverage coverage-gate perf quality quality-python quality-rust quality-components stress-chakra stress-python-demo stress-fastapi stress-rust-demo stress-components smoke-mui build metrics fetch-examples lint fmt fmt-check check-npm-version usage
 
 build:
 	cargo build
@@ -20,6 +20,10 @@ fmt-check:
 
 check-npm-version:
 	node scripts/check-npm-version.mjs
+
+# Real-usage scoreboard: human signal vs bot/CI noise. Needs `gh` authenticated.
+usage:
+	node scripts/usage.mjs
 
 test:
 	cargo test
