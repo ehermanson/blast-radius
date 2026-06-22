@@ -106,30 +106,32 @@ test('ambiguous edges on the impacted paths downgrade the verdict to partial', (
   assert.match(md, />confidence<\/a>: partial — 1 ambiguous edge on these paths/);
 });
 
-test('multiple changed files get a per-file impact breakdown', () => {
+test('multiple changed files get a per-file impact breakdown, directs only', () => {
   const md = renderComment({
     repo_root: '/repo',
     target: { kind: 'files', files: ['/repo/a.ts', '/repo/b.ts'] },
     summary: {
-      total_affected_files: 2,
+      total_affected_files: 3,
       directly_affected_files: 2,
-      transitively_affected_files: 0,
+      transitively_affected_files: 1,
       risk_tier: 'moderate',
     },
     workspaces: [],
     nodes: [
       { kind: 'file', label: 'src/x.ts', depth: 1 },
       { kind: 'file', label: 'src/y.ts', depth: 1 },
+      { kind: 'file', label: 'src/z.ts', depth: 2 },
     ],
     roots: [
       {
         file: 'a.ts',
-        affected: 2,
+        affected: 3,
         direct: 2,
-        indirect: 0,
+        indirect: 1,
         files: [
           { path: 'src/x.ts', depth: 1, endpoint: false },
-          { path: 'src/y.ts', depth: 1, endpoint: true },
+          { path: 'src/y.ts', depth: 1, endpoint: false },
+          { path: 'src/z.ts', depth: 2, endpoint: true },
         ],
       },
       { file: 'b.ts', affected: 0, direct: 0, indirect: 0, files: [] },
@@ -138,10 +140,26 @@ test('multiple changed files get a per-file impact breakdown', () => {
   assert.match(md, /\*\*What each changed file reaches\*\*/);
   // Each changed file gets attributed impact, with the path as <code> (renders
   // inside <summary>, where markdown backticks would not).
-  assert.match(md, /<code>a\.ts<\/code> — 2 impacted files \(2 direct, 0 indirect\)/);
+  assert.match(md, /<code>a\.ts<\/code> — 2 direct · 1 indirect \(3 total\)/);
+  // Direct consumers are enumerated...
   assert.match(md, /- `src\/x\.ts`/);
+  // ...but indirect (transitive) files are summarized as a count, not listed,
+  // so a hub file's whole-app reach can't drown the actionable directs.
+  assert.ok(!md.includes('- `src/z.ts`'));
+  assert.match(md, /\+ 1 file reached indirectly \(transitive\)/);
   // ...including "this change reaches nothing".
   assert.match(md, /<code>b\.ts<\/code> — no downstream impact/);
+});
+
+test('single changed file splits direct consumers from transitive reach', () => {
+  const md = renderComment(impactResult);
+  // Direct consumers (depth 1) are the headline list...
+  assert.match(md, /<summary>4 direct consumers<\/summary>/);
+  assert.match(md, /- `apps\/storefront\/src\/PromoCard\.tsx`/);
+  // ...and transitively-reached files (depth 2) live in their own drill-down,
+  // not mixed in as if they were direct dependents.
+  assert.match(md, /<summary>1 more reached indirectly \(transitive\)<\/summary>/);
+  assert.match(md, /- `apps\/storefront\/src\/App\.tsx`/);
 });
 
 test('a huge radius is capped so the comment stays under the size limit', () => {

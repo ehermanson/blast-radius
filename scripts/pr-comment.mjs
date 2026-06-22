@@ -80,22 +80,35 @@ export function renderComment(result) {
         );
         continue;
       }
+      // Lead with the direct consumers (the actionable review checklist —
+      // files that actually import the changed file). Transitive reach is a
+      // magnitude, not a checklist: a hub like a route tree pulls the whole app
+      // into the radius, so enumerating it per-root is noise. Keep it as a count.
+      const directs = (root.files || []).filter((f) => f.depth === 1).map((f) => f.path);
       const summaryLine =
-        `<code>${root.file}</code> — ${root.affected} impacted ${plural(root.affected, 'file')} ` +
-        `(${root.direct} direct, ${root.indirect} indirect)`;
+        `<code>${root.file}</code> — ${root.direct} direct` +
+        (root.indirect ? ` · ${root.indirect} indirect` : '') +
+        ` (${root.affected} total)`;
       lines.push('', `<details><summary>${summaryLine}</summary>`, '');
-      lines.push(...impactList((root.files || []).map((f) => f.path)));
+      lines.push(...impactList(directs));
+      if (root.indirect) {
+        lines.push(
+          '',
+          `<sub>+ ${root.indirect} ${plural(root.indirect, 'file')} reached indirectly (transitive)</sub>`,
+        );
+      }
       lines.push('</details>');
     }
     if (roots.length > MAX_ROOTS) {
       lines.push('', `_…and ${roots.length - MAX_ROOTS} more changed files._`);
     }
   } else {
-    // Single changed file: one flat list.
+    // Single changed file: lead with direct consumers, then transitive reach.
     lines.push('', changedSection(changed));
-    lines.push('', `<details><summary>All ${total} impacted files</summary>`, '');
-    lines.push(...impactList(impacted));
-    lines.push('</details>');
+    const entries = (result.nodes || [])
+      .filter((n) => n.kind === 'file' && (n.depth || 0) >= 1)
+      .map((n) => ({ path: n.label, depth: n.depth || 0 }));
+    lines.push('', ...impactSection(entries, direct, indirect));
   }
 
   lines.push('', confidenceNote(result));
@@ -109,6 +122,44 @@ const finalize = (lines) => lines.filter((l) => l !== null).join('\n').trimEnd()
 function impactList(labels) {
   const sorted = [...labels].sort();
   const lines = sorted.slice(0, MAX_LISTED).map((f) => `- \`${f}\``);
+  if (sorted.length > MAX_LISTED) lines.push(`- _…and ${sorted.length - MAX_LISTED} more_`);
+  return lines;
+}
+
+// Direct consumers up front (the review checklist), transitive reach demoted to
+// a collapsed, depth-ordered drill-down. `entries` is [{path, depth}] with the
+// changed file (depth 0) already excluded; counts come from the summary so the
+// section agrees with the headline.
+function impactSection(entries, directCount, indirectCount) {
+  const directs = entries.filter((e) => e.depth === 1).map((e) => e.path);
+  const indirects = entries.filter((e) => e.depth > 1);
+  const out = [];
+
+  if (directs.length) {
+    out.push(`<details><summary>${directCount} direct ${plural(directCount, 'consumer')}</summary>`, '');
+    out.push(...impactList(directs));
+    out.push('</details>');
+  } else {
+    out.push('_No direct consumers — every impacted file is reached transitively._');
+  }
+
+  if (indirects.length) {
+    out.push(
+      '',
+      `<details><summary>${indirectCount} more reached indirectly (transitive)</summary>`,
+      '',
+    );
+    out.push(...impactListByDepth(indirects));
+    out.push('</details>');
+  }
+  return out;
+}
+
+// Like `impactList`, but ordered nearest-first (by hop distance, then path) so
+// the closest dependents read at the top — a flat stand-in for a drill-down.
+function impactListByDepth(entries) {
+  const sorted = [...entries].sort((a, b) => a.depth - b.depth || a.path.localeCompare(b.path));
+  const lines = sorted.slice(0, MAX_LISTED).map((e) => `- \`${e.path}\``);
   if (sorted.length > MAX_LISTED) lines.push(`- _…and ${sorted.length - MAX_LISTED} more_`);
   return lines;
 }
