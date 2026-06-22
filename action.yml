@@ -1,4 +1,4 @@
-name: 'blast-radius'
+name: 'Blast Radius - Change Impact'
 description: "Comment a pull request's blast radius — the files a change reaches — and optionally gate on risk."
 branding:
   icon: 'target'
