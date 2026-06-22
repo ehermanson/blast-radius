@@ -2,6 +2,13 @@
   <img src="assets/blast-radius-aggressive-transparent.png" alt="blast-radius logo" width="375">
 </p>
 
+<p align="center">
+  <a href="https://www.npmjs.com/package/blast-radius-cli"><img src="https://img.shields.io/npm/v/blast-radius-cli?logo=npm&color=cb3837" alt="npm version"></a>
+  <a href="https://crates.io/crates/blast-radius"><img src="https://img.shields.io/crates/v/blast-radius?logo=rust&color=e43717" alt="crates.io version"></a>
+  <a href="https://github.com/ehermanson/blast-radius/actions/workflows/quality.yml"><img src="https://img.shields.io/github/actions/workflow/status/ehermanson/blast-radius/quality.yml?branch=main&logo=github&label=CI" alt="CI status"></a>
+  <a href="https://github.com/ehermanson/blast-radius/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
+</p>
+
 # blast-radius
 
 **When you change a file, find out what else might break.**
