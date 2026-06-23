@@ -194,6 +194,32 @@ test('no hotspot chart for a small, already-glanceable radius', () => {
   assert.ok(!renderComment(impactResult).includes('Impact by area'));
 });
 
+test('no hotspot chart when impact lands in a single area (a one-row bar is useless)', () => {
+  // Plenty of files (above the threshold), but all in one directory — there's
+  // no spread to show, so the chart is suppressed in favor of the plain list.
+  const nodes = Array.from({ length: 12 }, (_, i) => ({
+    kind: 'file',
+    label: `app/chat/file-${i}.tsx`,
+    depth: 1,
+  }));
+  const md = renderComment({
+    repo_root: '/repo',
+    target: { kind: 'file', file: '/repo/app/ui/button.tsx' },
+    summary: {
+      total_affected_files: 12,
+      directly_affected_files: 12,
+      transitively_affected_files: 0,
+      risk_tier: 'high',
+    },
+    roots: [],
+    nodes,
+    workspaces: [],
+  });
+  assert.ok(!md.includes('Impact by area'));
+  // ...but the direct consumers are still listed.
+  assert.match(md, /- `app\/chat\/file-0\.tsx`/);
+});
+
 test('a huge radius is capped so the comment stays under the size limit', () => {
   const nodes = Array.from({ length: 250 }, (_, i) => ({
     kind: 'file',
