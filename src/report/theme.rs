@@ -133,13 +133,24 @@ impl Theme {
         )
     }
 
-    /// A small proportional bar for the hotspot chart, tinted by severity.
-    pub(super) fn hotspot_bar(&self, tier: RiskTier, filled: usize, cells: usize) -> String {
+    /// A small proportional bar for the hotspot chart, split into a direct
+    /// (`█`, tier-tinted) and a transitive (`░`, dim) segment, with the rest of
+    /// the track left blank. Mirrors the PR comment's `█ direct · ░ transitive`
+    /// bars so both surfaces read identically.
+    pub(super) fn hotspot_bar_split(
+        &self,
+        tier: RiskTier,
+        direct: usize,
+        indirect: usize,
+        cells: usize,
+    ) -> String {
         let (_, fg, _) = tier_palette(tier);
+        let empty = cells.saturating_sub(direct + indirect);
         format!(
-            "{}{}",
-            self.paint("█".repeat(filled), fg),
-            self.paint("░".repeat(cells.saturating_sub(filled)), "2;37")
+            "{}{}{}",
+            self.paint("█".repeat(direct), fg),
+            self.paint("░".repeat(indirect), "2;37"),
+            " ".repeat(empty),
         )
     }
 

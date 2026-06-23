@@ -90,7 +90,7 @@ pub(super) fn render_tree(result: &AnalysisResult, verbose: bool, color: bool) -
         let hotspots = hotspot_dirs(result);
         if hotspots.len() >= 2 {
             lines.push(String::new());
-            lines.push(theme.rule("hotspots"));
+            lines.push(theme.rule("impact by area"));
             render_hotspots(&hotspots, assessment.tier, &theme, &mut lines);
         }
     }
@@ -400,24 +400,34 @@ const HOTSPOT_ROWS: usize = 6;
 /// chart would just repeat it.
 const HOTSPOT_MIN_FILES: usize = 8;
 
-/// Affected-file counts per directory, busiest first — the shape of the blast.
-fn hotspot_dirs(result: &AnalysisResult) -> Vec<(String, usize)> {
-    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+/// Per-directory affected-file counts split into direct (depth 1) and
+/// transitive (deeper) reach, busiest total first — the shape of the blast.
+/// Each entry is `(dir, direct, indirect)`.
+fn hotspot_dirs(result: &AnalysisResult) -> Vec<(String, usize, usize)> {
+    let mut counts: BTreeMap<String, (usize, usize)> = BTreeMap::new();
     for node in result
         .nodes
         .iter()
         .filter(|node| node.kind == NodeKind::File && node.depth >= 1)
     {
         let (dir, _) = split_dir(&node.label);
-        *counts.entry(dir.to_string()).or_default() += 1;
+        let entry = counts.entry(dir.to_string()).or_default();
+        if node.depth == 1 {
+            entry.0 += 1;
+        } else {
+            entry.1 += 1;
+        }
     }
-    let mut dirs: Vec<(String, usize)> = counts.into_iter().collect();
-    dirs.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    let mut dirs: Vec<(String, usize, usize)> = counts
+        .into_iter()
+        .map(|(dir, (direct, indirect))| (dir, direct, indirect))
+        .collect();
+    dirs.sort_by(|a, b| (b.1 + b.2).cmp(&(a.1 + a.2)).then(a.0.cmp(&b.0)));
     dirs
 }
 
 fn render_hotspots(
-    dirs: &[(String, usize)],
+    dirs: &[(String, usize, usize)],
     tier: RiskTier,
     theme: &Theme,
     lines: &mut Vec<String>,
@@ -426,21 +436,38 @@ fn render_hotspots(
     const LABEL_MAX: usize = 36;
 
     let shown = &dirs[..dirs.len().min(HOTSPOT_ROWS)];
-    let max = shown.iter().map(|(_, count)| *count).max().unwrap_or(1);
+    let max = shown
+        .iter()
+        .map(|(_, direct, indirect)| direct + indirect)
+        .max()
+        .unwrap_or(1)
+        .max(1);
     let labels: Vec<String> = shown
         .iter()
-        .map(|(dir, _)| clip_left(&dir_label(dir), LABEL_MAX))
+        .map(|(dir, _, _)| clip_left(&dir_label(dir), LABEL_MAX))
         .collect();
     let width = labels.iter().map(|l| l.chars().count()).max().unwrap_or(0);
 
-    for ((_, count), label) in shown.iter().zip(&labels) {
-        let filled = (count * BAR_CELLS).div_ceil(max).min(BAR_CELLS);
+    // Legend matches the PR comment header so both surfaces read the same.
+    lines.push(format!("  {}", theme.muted("█ direct  ░ transitive")));
+
+    for ((_, direct, indirect), label) in shown.iter().zip(&labels) {
+        let total = direct + indirect;
+        let filled = (total * BAR_CELLS).div_ceil(max).min(BAR_CELLS);
+        // Split the filled cells between direct and transitive by proportion,
+        // rounding the direct share (clamped so the two never exceed `filled`).
+        let direct_cells = (direct * filled + total / 2)
+            .checked_div(total)
+            .map_or(0, |cells| cells.min(filled));
+        let indirect_cells = filled - direct_cells;
         lines.push(format!(
-            "  {}{}  {} {}",
+            "  {}{}  {}  {} {}{}",
             theme.path(label),
             " ".repeat(width - label.chars().count()),
-            theme.hotspot_bar(tier, filled, BAR_CELLS),
-            theme.count(&format!("{:>3}", count)),
+            theme.hotspot_bar_split(tier, direct_cells, indirect_cells, BAR_CELLS),
+            theme.count(&format!("{direct:>3}")),
+            theme.muted("│"),
+            theme.muted(&format!("{indirect:>3}")),
         ));
     }
     if dirs.len() > shown.len() {
