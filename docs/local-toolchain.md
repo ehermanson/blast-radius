@@ -68,6 +68,23 @@ Two gates are available and can be combined; if either trips, the exit code is
 }
 ```
 
+Husky example. Husky doesn't pass changed files itself — it just runs a script
+on commit — so either delegate to `lint-staged` (above) from `.husky/pre-commit`:
+
+```bash
+# .husky/pre-commit
+npx lint-staged
+```
+
+or diff the staged files yourself and pipe them in:
+
+```bash
+# .husky/pre-commit
+git diff --cached --name-only --diff-filter=ACM \
+  | grep -E '\.(js|jsx|ts|tsx|vue|svelte|py|rs)$' \
+  | blast-radius --repo-root . files - || true
+```
+
 Lefthook example:
 
 ```yaml

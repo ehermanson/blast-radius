@@ -41,11 +41,18 @@ Use it to:
 - **Catch surprises in code review** — surface the files a diff touches that aren't in the diff.
 - **Gate risky commits in CI or pre-commit hooks** — fail the build when a change reaches too far.
 
+Run it as a **[GitHub Action](#github-action)** that comments the blast radius on
+PRs, a **[local pre-commit hook](#use-it-in-pre-commit-hooks-and-ci)** (lint-staged,
+Husky, Lefthook, pre-commit), a **[CI gate](#use-it-in-pre-commit-hooks-and-ci)**
+that fails on too-far-reaching changes, or **[ad-hoc on any file](#quick-start)**
+from the command line.
+
 It is built first and foremost for JavaScript and TypeScript repos (including
 monorepos) — and that includes React: JSX/TSX is parsed natively, and JSX
 component usage is tracked at the symbol level, so it can tell a file that
 merely imports `Button` from one that actually renders `<Button />`. Vue and
 Svelte script imports are supported too, with Python and Rust as beta adapters.
+See [Language support](#language-support).
 
 ## Quick start
 
@@ -60,21 +67,10 @@ npx blast-radius --help
 ```
 
 The same prebuilt binaries are attached to each
-[GitHub Release](https://github.com/ehermanson/blast-radius/releases) if you'd
-rather download one directly.
-
-Or build from source (requires a Rust toolchain with `cargo`):
-
-```bash
-# From crates.io
-cargo install blast-radius
-
-# Straight from GitHub
-cargo install --git https://github.com/ehermanson/blast-radius
-
-# Or from a local clone
-cargo install --path .
-```
+[GitHub Release](https://github.com/ehermanson/blast-radius/releases). You can
+also `cargo install blast-radius` (JS/TS only by default — see
+[Contributing](CONTRIBUTING.md#building-with-optional-language-support) for
+language features).
 
 Then point it at any file in your repo:
 
@@ -138,8 +134,8 @@ blast-radius --fail-on-risk risky files "$@"
 Exit codes: `0` no gate tripped, `1` analysis error, `2` gate tripped, `64`
 usage error (so CI can tell a misspelled flag apart from a tripped gate).
 
-See `docs/local-toolchain.md` for ready-to-paste examples with `lint-staged`,
-Lefthook, and the `pre-commit` framework.
+See [`docs/local-toolchain.md`](docs/local-toolchain.md) for ready-to-paste
+examples with `lint-staged`, Husky, Lefthook, and the `pre-commit` framework.
 
 ### GitHub Action
 
@@ -165,41 +161,18 @@ jobs:
 ```
 
 It posts one sticky comment and updates it in place. See
-`docs/github-action.md` for all inputs.
+[`docs/github-action.md`](docs/github-action.md) for all inputs.
 
 ## Reading the output
 
-The default `tree` output leads with a **risk verdict** — `minor`, `moderate`,
-`risky`, or `high` — plus a meter and the counts behind it. For larger blast
-radii a **hotspots** chart follows, showing the directories with the most
-impacted files, so you can see where the change lands before reading any paths.
+The `tree` output leads with a **risk verdict** (`minor`, `moderate`, `risky`,
+`high`) and a meter, then the impacted files grouped by package and directory.
+Files marked `◎ endpoint` are leaves nothing else depends on (apps, routes,
+pages) — a signal the change can reach something user-facing. The last line
+reports **confidence** in the result.
 
-The impacted files are then listed grouped by package and directory. Files
-marked `◎ endpoint` are leaves nothing else depends on (apps, routes, pages) —
-a signal the change can reach something user-facing. Past 200 impacted files
-the per-file lists collapse to directory rollups; pass `-v` to list every file.
-
-The last line reports **confidence** — see below.
-
-Pass `--verbose` (`-v`) to see the full root → cascade tree of exactly how the
-impact propagates.
-
-### Confidence
-
-The result ends with a confidence read so you know how much to trust it:
-
-- **high** — every import edge on the impacted paths resolved cleanly.
-- **partial — N ambiguous edges on these paths** — some edges the result was
-  traced through couldn't be pinned to a single target (e.g. a symbol re-exported
-  by several barrels), so a few listed files may be over-attributed.
-
-Two repo-wide caveats can be appended because their targets are unknown, so they
-might hide *additional* consumers not listed:
-
-- **N unresolved imports** — internal-looking imports that didn't resolve to a
-  file (often generated/virtual modules or build output). Quiet these with
-  `.blast-radius.json` (see [Configuration](#configuration)).
-- **N parse failures** — files that couldn't be parsed and were skipped.
+Full details — the hotspots chart, rollups for large radii, and how to read the
+confidence line — are in [`docs/output.md`](docs/output.md).
 
 ## Commands
 
@@ -207,168 +180,47 @@ might hide *additional* consumers not listed:
 | ---------------------- | --------------------------------------------------- |
 | `file <path>`          | Everything that depends on this file.               |
 | `export <path> <name>` | Everything that depends on a specific named export. |
-| `files <path>...`      | Blast radius for each file plus a combined total. `-` reads the list from stdin. |
-| `graph`                | Dump the whole-repo import graph (every file and resolved import edge). |
-| `completions <shell>`  | Print a completion script (bash, zsh, fish, elvish, powershell). |
+| `files <path>...`      | Blast radius for each file plus a combined total. `-` reads stdin. |
+| `graph`                | Dump the whole-repo import graph.                   |
+| `completions <shell>`  | Print a shell completion script.                    |
 
-Install completions by writing the script where your shell looks for them,
-e.g. `blast-radius completions zsh > ~/.zfunc/_blast-radius` (zsh, with
-`~/.zfunc` in `fpath`) or
-`blast-radius completions bash > /etc/bash_completion.d/blast-radius`.
-
-Global flags:
-
-| Flag                                  | Purpose                                             |
-| ------------------------------------- | --------------------------------------------------- |
-| `--repo-root <dir>`                   | Repo to analyze (default: current directory).       |
-| `--format <tree\|json\|mermaid\|dot>` | Output format (default: `tree`).                    |
-| `--output <file>`                     | Write output to a file instead of stdout.           |
-| `--verbose`, `-v`                     | Show the full cascade tree.                         |
-| `--quiet`, `-q`                       | No stdout output; exit codes and `--output` still apply. |
-| `--color <auto\|always\|never>`       | ANSI color handling (default: `auto`; `NO_COLOR` respected). |
-| `--explain-unresolved`                | Group unresolved internal imports by likely cause.  |
-| `--fail-threshold <n>`                | Exit code 2 when more than `n` downstream files are impacted (the changed files themselves are not counted). |
-| `--fail-on-risk <tier>`               | Exit code 2 when the verdict is at or above `tier`. |
-
-`--version` prints the version plus the language adapters compiled into the
-binary, so you can tell a JS/TS-only source build from the full prebuilt one.
-
-### Output formats
-
-- `tree` — the default human-readable verdict, meter, and impacted-file list.
-- `json` — structured output; the per-input-file breakdown lives in the `roots`
-  array. Carries a top-level `schema_version` (currently `1`), bumped only on
-  breaking shape changes — new fields may appear without a bump. The full
-  field-by-field contract is in `docs/json-output.md`.
-- `mermaid` — a Mermaid graph definition.
-- `dot` — Graphviz DOT.
+For all global flags, output formats (`json`/`mermaid`/`dot`), exit codes, and
+completion setup, see the [CLI reference](docs/cli.md) — or run
+`blast-radius --help`.
 
 ## Language support
 
-The default binary supports **JavaScript and TypeScript** (`js`, `jsx`, `ts`,
-`tsx`) — React codebases are the primary target, with symbol-level JSX
-component usage tracking and `React.lazy()`/dynamic `import()` detection —
-including ESM imports/exports, CommonJS `require`/`module.exports`,
-default and named exports, barrels, `export *`, side-effect imports
-(`import './setup'`), `tsconfig.json`/`jsconfig.json` path aliases, `baseUrl`, `extends`
-chains (including `tsconfig.base.json`-style shared configs), project
-`references` (aliases in referenced configs like `tsconfig.lib.json` are
-honored), package `imports`/`exports`, the `browser` entry field,
-`.js` specifiers backed by TypeScript source files,
-`.d.ts` declaration files, and cross-package resolution across workspace
-packages.
+`blast-radius` is built first and foremost for **JavaScript and TypeScript**
+(`js`, `jsx`, `ts`, `tsx`), with React as the primary target: symbol-level JSX
+usage tracking, `React.lazy()`/dynamic `import()`, ESM + CommonJS, barrels and
+`export *`, `tsconfig`/`jsconfig` path aliases and project references, package
+`imports`/`exports`, and cross-package resolution across workspaces.
 
-Other languages are compiled in at **build time** with Cargo features (there is
-no runtime `--language` flag — a binary scans whatever was built into it). The
-**prebuilt binaries** (the `blast-radius-cli` npm package and GitHub Release
-downloads) ship with **all language features already compiled in**, so this
-only matters when building from source:
-
-```bash
-cargo install --path .                              # JS/TS only (default)
-cargo install --path . --features vue,svelte        # + Vue + Svelte
-cargo install --path . --features python            # + Python (beta)
-cargo install --path . --features rust              # + Rust (beta)
-cargo install --path . --features python,rust,vue,svelte   # everything
-```
-
-**Vue and Svelte** ride the same battle-tested JS/TS pipeline: `<script>` and
-`<script setup>` blocks are extracted and parsed as TypeScript/JavaScript, so
-component imports are tracked when they appear in script. Template-only
-component references with no script import are not visible yet. The **Python
-and Rust** adapters use real parsers and work well on conventionally structured
-repos, but are labeled beta: see `docs/language-support.md` for their known
-blind spots before trusting them on an unconventional layout.
-
-Ruby and Java adapters were removed in 0.3.0 — their heuristic parsers were
-not accurate enough on real codebases to trust, and a wrong "looks safe"
-answer is worse than no answer (`docs/language-support.md` has the details;
-0.2.1 is the last release that included them).
+**Vue and Svelte** track imports in `<script>` blocks. **Python and Rust** are
+beta adapters built on real parsers. The prebuilt binaries ship with every
+language compiled in; source builds are JS/TS-only by default. See
+[`docs/language-support.md`](docs/language-support.md) for the full feature
+matrix and each adapter's known blind spots.
 
 ## Configuration
 
-An optional `.blast-radius.json` at the repo root lets a repository declare
-tooling quirks the analyzer shouldn't hardcode. It can ignore import specifiers
-that point at generated/virtual modules (CSS-in-JS codegen, route type stubs,
-published `dist` output, etc.) so they don't count against the unresolved-import
-confidence signal, and it can skip generated or vendored directories during repo
-discovery:
+An optional `.blast-radius.json` at the repo root lets a repo skip generated or
+vendored directories and quiet known-unresolvable import specifiers (CSS-in-JS
+codegen, route type stubs, etc.). See
+[`docs/configuration.md`](docs/configuration.md).
 
-```jsonc
-{
-  // comments and trailing commas are allowed (parsed as JSONC, like tsconfig)
-  "discovery": {
-    // repo-relative files or directory prefixes to skip while walking
-    "exclude": ["generated/", "vendor/snapshot/"],
-  },
-  "unresolved": {
-    "ignore": ["styled-system/css", ".velite", "/+types/"],
-  },
-}
-```
+## Documentation
 
-`discovery.exclude` entries are repo-relative prefixes. `unresolved.ignore`
-entries are matched as substrings of the import specifier. Asset imports
-(`.svg`, `.css`, `.json`, images, …) and type-only imports are ignored
-automatically. See `examples/chakra-ui/.blast-radius.json`.
+- [CLI reference](docs/cli.md) — commands, flags, output formats, exit codes
+- [Reading the output](docs/output.md) — verdict, hotspots, confidence
+- [Local toolchain](docs/local-toolchain.md) — lint-staged, Husky, Lefthook, pre-commit
+- [GitHub Action](docs/github-action.md) — inputs and behavior
+- [JSON output](docs/json-output.md) — the structured-output contract
+- [Configuration](docs/configuration.md) — `.blast-radius.json`
+- [Language support](docs/language-support.md) — per-language coverage and limits
+- [Contributing](CONTRIBUTING.md) — building from source, examples, dev workflow
 
-## Examples
+## Contributing
 
-The `examples/` directory has runnable fixtures for each supported language:
-
-| Fixture                     | Exercises                                                    |
-| --------------------------- | ------------------------------------------------------------ |
-| `monorepo-demo`             | Aliases, barrels, CommonJS, transitive React usage           |
-| `vite-react-ts`             | A real Vite React + TypeScript template                      |
-| `chakra-ui` †               | Chakra UI snapshot — large library-shaped React monorepo     |
-| `excalidraw` †              | Excalidraw snapshot — large real-world React **application**  |
-| `python-demo` / `fastapi` † | Python package, relative, and `__init__.py` reexport imports |
-| `rust-demo`                 | `mod`, `pub use`, `crate::` / `self::` imports               |
-| `component-demo`            | Mixed Vue/Svelte component imports                           |
-
-† `chakra-ui`, `excalidraw`, and `fastapi` are large real-world snapshots that
-aren't committed to the repo. Fetch them on demand (pinned to a known upstream
-commit) before running their examples:
-
-```bash
-scripts/fetch-examples.sh
-```
-
-Run against any of them with `--repo-root`:
-
-```bash
-# JS/TS monorepo fixture
-cargo run --bin blast-radius -- --repo-root examples/monorepo-demo file apps/storefront/src/App.tsx
-
-# Large React monorepo, with the full cascade tree
-cargo run --bin blast-radius -- --repo-root examples/chakra-ui -v file packages/react/src/components/button/button.tsx
-
-# Large real-world React app (Excalidraw)
-cargo run --bin blast-radius -- --repo-root examples/excalidraw file packages/element/src/index.ts
-
-# Python (needs the feature compiled in)
-cargo run --features python --bin blast-radius -- --repo-root examples/fastapi file fastapi/applications.py
-
-# Rust
-cargo run --features rust --bin blast-radius -- --repo-root examples/rust-demo file src/utils/formatting.rs
-
-# Vue/Svelte
-cargo run --features vue,svelte --bin blast-radius -- --repo-root examples/component-demo file src/shared.ts
-```
-
-## Development
-
-This project expects a Rust toolchain with `cargo` available locally. Common
-quality commands:
-
-```bash
-make test                 # core JS/TS test suite
-make test-all-languages   # every optional adapter
-make coverage             # coverage report
-make quality              # full quality gate
-```
-
-The `Makefile` has the full set, including per-language test/quality/stress
-targets (`make test-python`, `make stress-chakra`, etc.). See `docs/quality.md`
-for what each command validates and `docs/language-support.md` for the
-multi-language architecture.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for building from source (including
+optional language features), running the example fixtures, and the dev workflow.

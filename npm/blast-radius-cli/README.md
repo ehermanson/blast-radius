@@ -23,7 +23,7 @@ npx blast-radius-cli --help
 Either way, the command is `blast-radius`:
 
 ```sh
-npx blast-radius src/some/file.ts
+npx blast-radius file src/some/file.ts
 ```
 
 ## Notes
