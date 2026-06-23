@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-06-22
+
+### Added
+
+- The PR comment now includes an **"Impact by area"** hotspot chart showing
+  where a change's impact lands, with each bar split into direct vs transitive
+  reach. It is suppressed when the radius is small enough to read at a glance or
+  lands in a single area (a one-row chart adds nothing).
+
+### Changed
+
+- The PR comment now **leads with the direct consumers** of a change and demotes
+  transitive reach, so reviewers see the most relevant impact first.
+- The terminal report's hotspot chart now splits each bar into direct vs
+  transitive impact and is renamed **"Impact by area"** for parity with the PR
+  comment.
+
+### Fixed
+
+- The PR comment is hardened against large and malformed inputs: it enforces a
+  global size budget so a huge radius stays under GitHub's comment limit,
+  degrades to a sticky fallback comment on malformed analyzer output instead of
+  crashing, and surfaces changed files it had to skip as a coverage caveat.
+
+### Documentation
+
+- Restructured the README into a concise overview and moved reference material
+  into dedicated `docs/` pages (CLI reference, reading the output,
+  configuration) plus a new `CONTRIBUTING.md`.
+
 ## [0.7.3] - 2026-06-16
 
 ### Added

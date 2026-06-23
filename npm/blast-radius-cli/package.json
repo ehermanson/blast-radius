@@ -1,6 +1,6 @@
 {
   "name": "blast-radius-cli",
-  "version": "0.7.3",
+  "version": "0.8.0",
   "description": "Prebuilt blast-radius binary — analyze the transitive blast radius of code changes",
   "keywords": [
     "blast-radius",
@@ -30,11 +30,11 @@
     "node": ">=18"
   },
   "optionalDependencies": {
-    "blast-radius-cli-linux-x64": "0.7.3",
-    "blast-radius-cli-linux-arm64": "0.7.3",
-    "blast-radius-cli-linux-x64-musl": "0.7.3",
-    "blast-radius-cli-darwin-x64": "0.7.3",
-    "blast-radius-cli-darwin-arm64": "0.7.3",
-    "blast-radius-cli-win32-x64": "0.7.3"
+    "blast-radius-cli-linux-x64": "0.8.0",
+    "blast-radius-cli-linux-arm64": "0.8.0",
+    "blast-radius-cli-linux-x64-musl": "0.8.0",
+    "blast-radius-cli-darwin-x64": "0.8.0",
+    "blast-radius-cli-darwin-arm64": "0.8.0",
+    "blast-radius-cli-win32-x64": "0.8.0"
   }
 }
