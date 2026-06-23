@@ -52,8 +52,8 @@ test('headline reports tier, totals, and package count', () => {
 test('lists impacted files as a flat list of repo-relative paths, excluding the changed file', () => {
   const md = renderComment(impactResult);
   assert.match(md, /- `apps\/storefront\/src\/App\.tsx`/);
-  // No directory-grouping headers or "where it lands" summary.
-  assert.ok(!md.includes('Where it lands'));
+  // A small, glanceable radius gets no chart — just the list.
+  assert.ok(!md.includes('Impact by area'));
   assert.ok(!md.includes('**`apps/storefront/src`**'));
   // The changed root and export-kind nodes are not listed as impacted.
   assert.ok(!md.includes('- `packages/ui/src/Button.tsx`'));
@@ -160,6 +160,38 @@ test('single changed file splits direct consumers from transitive reach', () => 
   // not mixed in as if they were direct dependents.
   assert.match(md, /<summary>1 more reached indirectly \(transitive\)<\/summary>/);
   assert.match(md, /- `apps\/storefront\/src\/App\.tsx`/);
+});
+
+test('a hotspot chart summarizes where impact lands, split direct vs transitive', () => {
+  const nodes = [
+    // 6 files under chat/ (4 direct, 2 transitive), 3 under routes/ (all transitive).
+    ...['a', 'b', 'c', 'd'].map((n) => ({ kind: 'file', label: `app/chat/${n}.tsx`, depth: 1 })),
+    ...['e', 'f'].map((n) => ({ kind: 'file', label: `app/chat/${n}.tsx`, depth: 2 })),
+    ...['x', 'y', 'z'].map((n) => ({ kind: 'file', label: `app/routes/${n}.tsx`, depth: 3 })),
+  ];
+  const md = renderComment({
+    repo_root: '/repo',
+    target: { kind: 'file', file: '/repo/app/ui/button.tsx' },
+    summary: {
+      total_affected_files: 9,
+      directly_affected_files: 4,
+      transitively_affected_files: 5,
+      risk_tier: 'high',
+    },
+    roots: [],
+    nodes,
+    workspaces: [],
+  });
+  assert.match(md, /\*\*Impact by area\*\* — █ direct · ░ transitive/);
+  // The busiest area leads, with its direct/transitive counts.
+  assert.match(md, /app\/chat\/ +█+░+ +4 │ +2/);
+  // A purely-transitive area renders an all-░ bar — the route-tree noise, legible.
+  assert.match(md, /app\/routes\/ +░+ +0 │ +3/);
+});
+
+test('no hotspot chart for a small, already-glanceable radius', () => {
+  // impactResult has only 5 impacted files — below the charting threshold.
+  assert.ok(!renderComment(impactResult).includes('Impact by area'));
 });
 
 test('a huge radius is capped so the comment stays under the size limit', () => {

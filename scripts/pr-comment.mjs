@@ -25,6 +25,13 @@ const TIERS = {
 const MAX_LISTED = 100;
 const MAX_ROOTS = 20;
 
+// Hotspot chart sizing, mirrored from the terminal report (src/report/tree.rs)
+// so the two surfaces tell the same story.
+const HOTSPOT_ROWS = 6;
+const HOTSPOT_MIN_FILES = 8;
+const BAR_CELLS = 14;
+const LABEL_MAX = 34;
+
 // Mirror of the Rust `package_key`: the longest matching workspace root, else
 // the top-level directory.
 function packageKey(rel, workspaces) {
@@ -63,6 +70,17 @@ export function renderComment(result) {
     `${tier.emoji} **${tier.label}** — ${total} impacted ${plural(total, 'file')} across ` +
       `${packages} ${plural(packages, 'package')} (${direct} direct, ${indirect} indirect)`,
   );
+
+  // "Where it lands": a two-tone hotspot chart over ALL impacted files (single
+  // or multi), the overview to the per-file checklists below. Mirrors the
+  // terminal HOTSPOTS chart, with each bar split direct (█) vs transitive (░).
+  const entries = (result.nodes || [])
+    .filter((n) => n.kind === 'file' && (n.depth || 0) >= 1)
+    .map((n) => ({ path: n.label, depth: n.depth || 0 }));
+  if (total >= HOTSPOT_MIN_FILES) {
+    const chart = hotspotSection(entries);
+    if (chart.length) lines.push('', ...chart);
+  }
 
   const roots = (result.roots || []).slice().sort((a, b) => b.affected - a.affected);
   if (roots.length > 1) {
@@ -154,6 +172,56 @@ function impactSection(entries, directCount, indirectCount) {
   }
   return out;
 }
+
+// A two-tone "where it lands" chart: impacted files bucketed by their parent
+// directory, busiest first, each bar split into direct (█) and transitive (░)
+// reach. This is the magnitude+spread overview a tree can't give without
+// exploding on fan-in. Rendered in a code block so the monospace bars align in
+// both the terminal and a GitHub comment. Returns [] when there's nothing worth
+// charting (fewer than two areas). `entries` is [{path, depth}], depth >= 1.
+function hotspotSection(entries) {
+  const areas = new Map();
+  for (const e of entries) {
+    const dir = splitDir(e.path);
+    const a = areas.get(dir) || { direct: 0, indirect: 0 };
+    if (e.depth === 1) a.direct += 1;
+    else a.indirect += 1;
+    areas.set(dir, a);
+  }
+  if (areas.size < 2) return [];
+
+  const rows = [...areas.entries()]
+    .map(([dir, c]) => ({ dir, direct: c.direct, indirect: c.indirect, total: c.direct + c.indirect }))
+    .sort((a, b) => b.total - a.total || a.dir.localeCompare(b.dir));
+  const shown = rows.slice(0, HOTSPOT_ROWS);
+  const max = Math.max(...shown.map((r) => r.total), 1);
+  const labels = shown.map((r) => clipLeft(dirLabel(r.dir), LABEL_MAX));
+  const width = Math.max(...labels.map((l) => l.length));
+
+  const out = ['**Impact by area** — █ direct · ░ transitive', '', '```'];
+  shown.forEach((r, i) => {
+    const filled = Math.min(BAR_CELLS, Math.ceil((r.total * BAR_CELLS) / max));
+    const filledDirect = r.total ? Math.min(filled, Math.round((r.direct / r.total) * filled)) : 0;
+    const bar =
+      '█'.repeat(filledDirect) +
+      '░'.repeat(filled - filledDirect) +
+      ' '.repeat(BAR_CELLS - filled);
+    const counts = `${String(r.direct).padStart(3)} │${String(r.indirect).padStart(3)}`;
+    out.push(`${labels[i].padEnd(width)}  ${bar}  ${counts}`);
+  });
+  const more = rows.length - shown.length;
+  if (more > 0) out.push(`+${more} more ${more === 1 ? 'directory' : 'directories'}`);
+  out.push('```');
+  return out;
+}
+
+const splitDir = (path) => {
+  const i = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+  return i === -1 ? '' : path.slice(0, i);
+};
+const dirLabel = (dir) => (dir === '' ? './' : `${dir}/`);
+// Truncate from the left, keeping the most specific (rightmost) path segments.
+const clipLeft = (text, max) => (text.length <= max ? text : `…${text.slice(text.length - (max - 1))}`);
 
 // Like `impactList`, but ordered nearest-first (by hop distance, then path) so
 // the closest dependents read at the top — a flat stand-in for a drill-down.
