@@ -24,6 +24,12 @@ const TIERS = {
 
 const MAX_LISTED = 100;
 const MAX_ROOTS = 20;
+// Global budget on enumerated file paths across ALL per-file sections, so a
+// many-file PR can't produce a comment past GitHub's 65,536-char limit. Each
+// changed file gets a fair share (at least MIN_PER_ROOT) so no single huge
+// change starves the rest. ~250 paths keeps the body well under the limit.
+const MAX_COMMENT_LIST = 250;
+const MIN_PER_ROOT = 8;
 
 // Hotspot chart sizing, mirrored from the terminal report (src/report/tree.rs)
 // so the two surfaces tell the same story.
@@ -45,6 +51,9 @@ function packageKey(rel, workspaces) {
 }
 
 export function renderComment(result) {
+  // Never throw on malformed input: a non-object (null, array, parse leftovers)
+  // degrades to an empty result rather than crashing the action's comment step.
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return fallbackComment();
   const summary = result.summary || {};
   const total = summary.total_affected_files || 0;
   const tier = TIERS[summary.risk_tier] || { label: summary.risk_tier || 'unknown', emoji: '•' };
@@ -87,7 +96,9 @@ export function renderComment(result) {
     // Multiple changed files: attribute impact to each one (the combined total
     // in the headline double-counts files reachable from more than one input).
     lines.push('', '**What each changed file reaches**');
-    for (const root of roots.slice(0, MAX_ROOTS)) {
+    const shownRoots = roots.slice(0, MAX_ROOTS);
+    let listBudget = MAX_COMMENT_LIST;
+    shownRoots.forEach((root, idx) => {
       if (!root.affected) {
         lines.push(
           '',
@@ -96,7 +107,7 @@ export function renderComment(result) {
           '_Nothing depends on this file._',
           '</details>',
         );
-        continue;
+        return;
       }
       // Lead with the direct consumers (the actionable review checklist —
       // files that actually import the changed file). Transitive reach is a
@@ -108,7 +119,12 @@ export function renderComment(result) {
         (root.indirect ? ` · ${root.indirect} indirect` : '') +
         ` (${root.affected} total)`;
       lines.push('', `<details><summary>${summaryLine}</summary>`, '');
-      lines.push(...impactList(directs));
+      // Fair share of the remaining global budget, so one huge change can't eat
+      // the whole comment and starve later files (and we stay under the limit).
+      const rootsLeft = shownRoots.length - idx;
+      const allowance = Math.min(MAX_LISTED, Math.max(MIN_PER_ROOT, Math.floor(listBudget / rootsLeft)));
+      lines.push(...impactList(directs, allowance));
+      listBudget -= Math.min(directs.length, allowance);
       if (root.indirect) {
         lines.push(
           '',
@@ -116,7 +132,7 @@ export function renderComment(result) {
         );
       }
       lines.push('</details>');
-    }
+    });
     if (roots.length > MAX_ROOTS) {
       lines.push('', `_…and ${roots.length - MAX_ROOTS} more changed files._`);
     }
@@ -135,12 +151,26 @@ export function renderComment(result) {
 
 const finalize = (lines) => lines.filter((l) => l !== null).join('\n').trimEnd() + '\n';
 
+// A graceful, sticky comment for when there's no usable analysis to render
+// (the analyzer emitted nothing or invalid JSON). Keeps the MARKER so it
+// updates the existing comment in place instead of leaving a stale report.
+export function fallbackComment() {
+  return finalize([
+    MARKER,
+    '## 🧨 blast-radius',
+    '',
+    "⚠️ Couldn't read the blast-radius analysis, so there's nothing to report for this change.",
+    '',
+    `<sub><a href="${REPO_URL}">blast-radius</a></sub>`,
+  ]);
+}
+
 // A flat, alphabetical list of impacted files (repo-relative paths), capped so a
 // huge radius can't blow GitHub's comment size limit.
-function impactList(labels) {
+function impactList(labels, max = MAX_LISTED) {
   const sorted = [...labels].sort();
-  const lines = sorted.slice(0, MAX_LISTED).map((f) => `- \`${f}\``);
-  if (sorted.length > MAX_LISTED) lines.push(`- _…and ${sorted.length - MAX_LISTED} more_`);
+  const lines = sorted.slice(0, max).map((f) => `- \`${f}\``);
+  if (sorted.length > max) lines.push(`- _…and ${sorted.length - max} more_`);
   return lines;
 }
 
@@ -270,6 +300,14 @@ function confidenceNote(result) {
       : `${label}: partial — ${onPathAmbiguous} ambiguous ${plural(onPathAmbiguous, 'edge')} on these paths`;
 
   const caveats = [];
+  // Coverage gap: changed files the analyzer couldn't include (missing on disk
+  // or not a recognized source file). Surface it so the report never reads as
+  // if it covered every changed file when it didn't.
+  if (summary.skipped_inputs) {
+    caveats.push(
+      `${summary.skipped_inputs} changed ${plural(summary.skipped_inputs, 'file')} skipped (not analyzed)`,
+    );
+  }
   if (total > 0 && summary.unresolved_imports) {
     caveats.push(`${summary.unresolved_imports} unresolved imports repo-wide may hide consumers`);
   }
@@ -289,6 +327,15 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   process.stdin.setEncoding('utf8');
   process.stdin.on('data', (chunk) => (input += chunk));
   process.stdin.on('end', () => {
-    process.stdout.write(renderComment(JSON.parse(input)));
+    let result;
+    try {
+      result = JSON.parse(input);
+    } catch {
+      // Analyzer crashed or emitted partial/empty output: post a clear note
+      // instead of a stack trace that fails the whole check with no comment.
+      process.stdout.write(fallbackComment());
+      return;
+    }
+    process.stdout.write(renderComment(result));
   });
 }

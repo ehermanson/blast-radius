@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { renderComment, MARKER } from './pr-comment.mjs';
+import { renderComment, fallbackComment, MARKER } from './pr-comment.mjs';
 
 const impactResult = {
   repo_root: '/repo',
@@ -241,4 +241,64 @@ test('a huge radius is capped so the comment stays under the size limit', () => 
   });
   assert.match(md, /…and 150 more/);
   assert.ok(md.length < 65000, 'comment must stay under the GitHub comment limit');
+});
+
+test('a many-file change stays under the size limit via a shared list budget', () => {
+  // 20 changed files, each reaching 150 direct files — without a global budget
+  // this blows well past GitHub's 65,536-char comment limit.
+  const roots = Array.from({ length: 20 }, (_, r) => ({
+    file: `packages/app/src/feature-${r}/widget-${r}.tsx`,
+    affected: 150,
+    direct: 150,
+    indirect: 0,
+    files: Array.from({ length: 150 }, (_, i) => ({
+      path: `packages/app/src/area-${i % 12}/deeply/nested/file-${r}-${i}.tsx`,
+      depth: 1,
+    })),
+  }));
+  const md = renderComment({
+    repo_root: '/repo',
+    target: { kind: 'files', files: roots.map((r) => r.file) },
+    summary: {
+      total_affected_files: 3000,
+      directly_affected_files: 3000,
+      transitively_affected_files: 0,
+      risk_tier: 'high',
+    },
+    roots,
+    nodes: roots.flatMap((rt) => rt.files.map((f) => ({ kind: 'file', label: f.path, depth: 1 }))),
+    workspaces: [],
+  });
+  assert.ok(md.length < 65536, `comment must stay under the GitHub limit (was ${md.length})`);
+  // Truncation is shown, not silent.
+  assert.match(md, /…and \d+ more/);
+  // Every changed file still gets its own section + count.
+  assert.match(md, /<code>packages\/app\/src\/feature-0\/widget-0\.tsx<\/code> — 150 direct/);
+});
+
+test('malformed analyzer output degrades to a sticky fallback, not a crash', () => {
+  // null / non-object inputs must not throw — the action's comment step depends
+  // on always getting renderable Markdown back.
+  for (const bad of [null, undefined, 42, 'oops', []]) {
+    const md = renderComment(bad);
+    assert.ok(md.startsWith(MARKER), `kept the sticky marker for ${JSON.stringify(bad)}`);
+    assert.match(md, /Couldn't read the blast-radius analysis/);
+  }
+  // The exported fallback is itself a valid, sticky comment.
+  assert.ok(fallbackComment().startsWith(MARKER));
+  assert.match(fallbackComment(), /⚠️/);
+});
+
+test('skipped changed files are surfaced as a coverage caveat', () => {
+  const md = renderComment({
+    ...impactResult,
+    summary: { ...impactResult.summary, skipped_inputs: 2 },
+  });
+  assert.match(md, /2 changed files skipped \(not analyzed\)/);
+  // Singular form too.
+  const one = renderComment({
+    ...impactResult,
+    summary: { ...impactResult.summary, skipped_inputs: 1 },
+  });
+  assert.match(one, /1 changed file skipped \(not analyzed\)/);
 });
