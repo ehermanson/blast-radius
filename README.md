@@ -155,7 +155,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - uses: ehermanson/blast-radius@v0.7.3
+      - uses: ehermanson/blast-radius@v0.8.0
         with:
           fail-on-risk: high # optional
 ```
